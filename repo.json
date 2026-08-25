@@ -11,8 +11,8 @@
     "Punchline": "Posts your hunt train's finish time + per-mark respawn estimates to Discord.",
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/v1.0/HuntTrainRelay.zip",
-    "DownloadLinkTesting": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/v1.0/HuntTrainRelay.zip",
-    "DownloadLinkUpdate": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/v1.0/HuntTrainRelay.zip"
+    "DownloadLinkInstall": "https://github.com/musicmanbowls/HuntTrainRelay/releases/download/1.0.0/HuntTrainRelay.zip",
+    "DownloadLinkTesting": "https://github.com/musicmanbowls/HuntTrainRelay/releases/download/1.0.0/HuntTrainRelay.zip",
+    "DownloadLinkUpdate": "https://github.com/musicmanbowls/HuntTrainRelay/releases/download/1.0.0/HuntTrainRelay.zip"
   }
 ]
