@@ -1,8 +1,0 @@
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\bin\Debug\HuntTrainRelay.deps.json
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\bin\Debug\HuntTrainRelay.dll
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Debug\HuntTrainRelay.csproj.AssemblyReference.cache
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Debug\HuntTrainRelay.GeneratedMSBuildEditorConfig.editorconfig
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Debug\HuntTrainRelay.AssemblyInfoInputs.cache
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Debug\HuntTrainRelay.AssemblyInfo.cs
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Debug\HuntTrainRelay.csproj.CoreCompileInputs.cache
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Debug\HuntTrainRelay.dll

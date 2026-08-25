@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyDescriptionAttribute(("Watches Hunt Helper\'s recorded A-Rank train and posts a Discord webhook with per-" +
     "mark respawn estimates when the train is fully cleared."))]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0.0+c7f406d32f0a187dcf7eab5576ead1c23d0d56cd")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0.0+4c9fa6a664dd01cb5b7746c0b4be73d0e4c462b5")]
 [assembly: System.Reflection.AssemblyProductAttribute("HuntTrainRelay")]
 [assembly: System.Reflection.AssemblyTitleAttribute("HuntTrainRelay")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
