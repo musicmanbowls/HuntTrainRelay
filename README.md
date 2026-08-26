@@ -60,22 +60,31 @@ Treat the webhook URL like a password — anyone who has it can post to that cha
   report (e.g. they sent you their own Hunt Helper export code privately).
 
 **Flags**
-- *Add S-Rank*: pick any S-rank from the dropdown (sorted by expansion) to
-  start watching for it this train. Each one gets Spawned / Didn't Spawn
-  checkboxes, and shows up on the eventual Discord report either way.
+- *Add S-Rank*: three quick buttons — Narrow-rift, Ophioneus, Tyger — the only
+  ones the group actually checks for during trains. Each gets Spawned / Didn't
+  Spawn checkboxes and shows up on the eventual Discord report either way.
 - *Add Rally Flag*: a location planned ahead of time — e.g. an aetheryte to
   meet at before everyone switches instance. Doesn't appear on the Discord
   report; it's a live, in-the-moment coordination tool, not a historical record.
-- *Copy Message*: puts something like `Heritage Found Instance 1 — <flag>` on
-  your clipboard. `<flag>` is FFXIV's own built-in placeholder — set your
-  actual in-game flag with Ctrl+Right-Click when you're at (or ready to
-  reference) the spot, then paste and send in Say/Shout; the game fills in
-  your current flag automatically. No coordinates involved on our end at all.
+- *Location*: Territory ID, Map ID, optional instance, and X/Y — visible as
+  plain text under the label at all times, not hidden behind a button. Once
+  filled in: **Ping My Map** actually sets your own in-game flag to that spot
+  (not just a view — the same as Ctrl+Right-Clicking it yourself), and
+  **Copy Message** puts something like `Heritage Found Instance 1 — <flag>`
+  on your clipboard. Ping first, then Copy right after — the `<flag>`
+  placeholder (FFXIV's own built-in chat feature) resolves correctly to
+  wherever you just pinged when you paste and send.
+- *Save to Library*: turns a one-off location into a reusable one — see Saved
+  Locations below.
 - *Open Flag List Popup*: a small separate window, independent of the main
   settings window, meant to sit on the side of your screen while conducting.
-  Shows the same list with just the quick actions (spawn status, Copy
-  Message) — adding or removing flags still happens on this tab.
+  Same quick actions (spawn status, Ping, Copy) — adding/removing flags still
+  happens on this tab.
 - The whole list clears when the train ends, same as tracking.
+
+**Settings** also has a **Saved Locations** section — set up a rally point
+once with real coordinates, and it's a one-click "Add from Library" pick on
+the Flags tab for every future train, instead of retyping numbers each time.
 
 **Marks Slain**
 - Live preview of exactly what End Train Now would post right now, in your

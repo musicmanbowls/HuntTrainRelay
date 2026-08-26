@@ -21,6 +21,29 @@ public class FlagEntry
     public string Label { get; set; } = string.Empty;
     public bool IsSRank { get; set; } = false;
     public SpawnStatus SpawnStatus { get; set; } = SpawnStatus.Unknown;
+
+    public bool HasLocation { get; set; } = false;
+    public uint TerritoryId { get; set; } = 0;
+    public uint MapId { get; set; } = 0;
+    public int Instance { get; set; } = 0;
+    public float X { get; set; } = 0;
+    public float Y { get; set; } = 0;
+}
+
+/// <summary>
+/// A reusable, named location — set up once with real coordinates, then picked
+/// from a dropdown on every future train instead of retyping numbers each time.
+/// Persists forever (unlike the per-train Flags list, which resets every train).
+/// </summary>
+[Serializable]
+public class SavedLocation
+{
+    public string Name { get; set; } = string.Empty;
+    public uint TerritoryId { get; set; } = 0;
+    public uint MapId { get; set; } = 0;
+    public int Instance { get; set; } = 0;
+    public float X { get; set; } = 0;
+    public float Y { get; set; } = 0;
 }
 
 [Serializable]
@@ -45,6 +68,11 @@ public class Configuration : IPluginConfiguration
     /// successful End Train Now, same lifecycle as tracking itself.
     /// </summary>
     public List<FlagEntry> Flags { get; set; } = new();
+
+    /// <summary>
+    /// The reusable location library — persists across every train, unlike Flags.
+    /// </summary>
+    public List<SavedLocation> SavedLocations { get; set; } = new();
 
     /// <summary>
     /// Only the conductor actively recording the train should have this on,

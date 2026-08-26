@@ -18,10 +18,19 @@ public sealed class Plugin : IDalamudPlugin
     private const int MaxWebhooks = 5;
     private const int MaxAdditionalScouts = 3;
 
+    // Only the S-ranks conductors actually check for during trains, per group feedback.
+    private static readonly (string Name, string Expansion)[] QuickSRanks =
+    {
+        ("Narrow-rift", "Endwalker"),
+        ("Ophioneus", "Endwalker"),
+        ("Tyger", "Shadowbringers"),
+    };
+
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
     private readonly IObjectTable _objectTable;
+    private readonly IGameGui _gameGui;
     private readonly IPluginLog _log;
 
     private readonly Configuration _config;
@@ -31,10 +40,15 @@ public sealed class Plugin : IDalamudPlugin
     private bool _configWindowVisible;
     private bool _flagPopoutVisible;
     private string _lastPostResult = string.Empty;
-    private int _selectedSRankIndex;
+    private int _selectedSavedLocationIndex;
 
-    private static readonly List<SRankInfo> SRankChoices =
-        SRankData.All.OrderBy(s => s.Order).ThenBy(s => s.Name).ToList();
+    // New Saved Location form state (Settings tab)
+    private string _newLocationName = string.Empty;
+    private int _newLocationTerritory;
+    private int _newLocationMap;
+    private int _newLocationInstance;
+    private float _newLocationX;
+    private float _newLocationY;
 
     public Plugin(
         IDalamudPluginInterface pluginInterface,
@@ -42,12 +56,14 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IChatGui chatGui,
         IObjectTable objectTable,
+        IGameGui gameGui,
         IPluginLog pluginLog)
     {
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
         _chatGui = chatGui;
         _objectTable = objectTable;
+        _gameGui = gameGui;
         _log = pluginLog;
 
         _config = _pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
@@ -182,7 +198,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (!_configWindowVisible) return;
 
-        ImGui.SetNextWindowSize(new Vector2(480, 480), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(500, 520), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Hunt Train Relay", ref _configWindowVisible))
         {
             if (ImGui.BeginTabBar("HuntTrainRelayTabs"))
@@ -234,14 +250,14 @@ public sealed class Plugin : IDalamudPlugin
     /// A small, separate always-available window listing the current flags —
     /// meant to sit on the side of the screen while conducting, independent of
     /// whether the main settings window is even open. Only quick actions here
-    /// (spawn status, copy message); adding/removing flags stays on the Flags
-    /// tab in the main window.
+    /// (spawn status, ping, copy message); adding/removing flags stays on the
+    /// Flags tab in the main window.
     /// </summary>
     private void DrawFlagPopout()
     {
         if (!_flagPopoutVisible) return;
 
-        ImGui.SetNextWindowSize(new Vector2(280, 220), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(320, 260), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Hunt Train Flags", ref _flagPopoutVisible))
         {
             if (_config.Flags.Count == 0)
@@ -253,6 +269,11 @@ public sealed class Plugin : IDalamudPlugin
             {
                 ImGui.PushID(flag.GetHashCode());
                 ImGui.TextWrapped(flag.IsSRank ? $"[S] {flag.Label}" : flag.Label);
+
+                if (!flag.IsSRank && flag.HasLocation)
+                {
+                    ImGui.TextDisabled(MapLinkHelper.CoordinateSummary(flag));
+                }
 
                 if (flag.IsSRank)
                 {
@@ -269,6 +290,14 @@ public sealed class Plugin : IDalamudPlugin
                     {
                         flag.SpawnStatus = notSpawned ? SpawnStatus.NotSpawned : SpawnStatus.Unknown;
                         _config.Save();
+                    }
+                    ImGui.SameLine();
+                }
+                else if (flag.HasLocation)
+                {
+                    if (ImGui.Button("Ping"))
+                    {
+                        MapLinkHelper.OpenMap(_gameGui, flag);
                     }
                     ImGui.SameLine();
                 }
@@ -363,32 +392,59 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Separator();
         ImGui.Spacing();
 
-        // --- Add S-rank ---
+        // --- Add S-rank (fixed quick list, per group feedback) ---
         ImGui.TextWrapped("Add an S-rank to watch for:");
-        var choiceLabels = SRankChoices.Select(s => $"{s.Expansion} — {s.Name}").ToArray();
-        if (choiceLabels.Length > 0)
+        foreach (var (sName, sExpansion) in QuickSRanks)
         {
-            ImGui.SetNextItemWidth(320);
-            ImGui.Combo("##sRankChoice", ref _selectedSRankIndex, choiceLabels, choiceLabels.Length);
-            ImGui.SameLine();
-            if (ImGui.Button("Add S-Rank"))
+            if (ImGui.Button($"Add {sName}"))
             {
-                var chosen = SRankChoices[_selectedSRankIndex];
-                _config.Flags.Add(new FlagEntry { Label = chosen.Name, IsSRank = true });
+                _config.Flags.Add(new FlagEntry { Label = sName, IsSRank = true });
+                _config.Save();
+            }
+            ImGui.SameLine();
+        }
+        ImGui.NewLine();
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // --- Add Rally Flag ---
+        ImGui.TextWrapped("Add a Rally Flag:");
+
+        if (_config.SavedLocations.Count > 0)
+        {
+            var savedNames = _config.SavedLocations.Select(s => s.Name).ToArray();
+            ImGui.SetNextItemWidth(220);
+            ImGui.Combo("##savedLocation", ref _selectedSavedLocationIndex, savedNames, savedNames.Length);
+            ImGui.SameLine();
+            if (ImGui.Button("Add from Library"))
+            {
+                var loc = _config.SavedLocations[_selectedSavedLocationIndex];
+                _config.Flags.Add(new FlagEntry
+                {
+                    Label = loc.Name,
+                    IsSRank = false,
+                    HasLocation = true,
+                    TerritoryId = loc.TerritoryId,
+                    MapId = loc.MapId,
+                    Instance = loc.Instance,
+                    X = loc.X,
+                    Y = loc.Y,
+                });
                 _config.Save();
             }
         }
 
         ImGui.Spacing();
-        if (ImGui.Button("Add Rally Flag"))
+        if (ImGui.Button("Add Blank Rally Flag"))
         {
             _config.Flags.Add(new FlagEntry { Label = "New Rally Flag", IsSRank = false });
             _config.Save();
         }
         ImGui.TextDisabled(
-            "For a location planned ahead of time (e.g. an aetheryte to meet at). Set your own " +
-            "in-game flag with Ctrl+Right-Click when you're actually there, then use Copy Message " +
-            "to send it — the <flag> placeholder fills in automatically when you send the message."
+            "Set your own in-game flag with Ctrl+Right-Click, or use Ping My Map below once a " +
+            "location's filled in. New locations can be saved to the Library (Settings tab) for reuse."
         );
 
         ImGui.Spacing();
@@ -433,24 +489,104 @@ public sealed class Plugin : IDalamudPlugin
                 flag.SpawnStatus = notSpawned ? SpawnStatus.NotSpawned : SpawnStatus.Unknown;
                 _config.Save();
             }
-        }
-        else
-        {
-            var label = flag.Label;
-            ImGui.SetNextItemWidth(300);
-            if (ImGui.InputText("Label", ref label, 256))
+
+            ImGui.Spacing();
+            if (ImGui.Button("Remove"))
             {
-                flag.Label = label;
+                onRemove();
             }
-            if (ImGui.IsItemDeactivatedAfterEdit()) _config.Save();
+            return;
+        }
+
+        var label = flag.Label;
+        ImGui.SetNextItemWidth(300);
+        if (ImGui.InputText("Label", ref label, 256))
+        {
+            flag.Label = label;
+        }
+        if (ImGui.IsItemDeactivatedAfterEdit()) _config.Save();
+
+        ImGui.TextWrapped(MapLinkHelper.CoordinateSummary(flag));
+
+        var territory = (int)flag.TerritoryId;
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.InputInt("Territory ID", ref territory))
+        {
+            flag.TerritoryId = (uint)Math.Max(0, territory);
+            flag.HasLocation = flag.TerritoryId > 0 && flag.MapId > 0;
+            _config.Save();
+        }
+
+        var map = (int)flag.MapId;
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.InputInt("Map ID", ref map))
+        {
+            flag.MapId = (uint)Math.Max(0, map);
+            flag.HasLocation = flag.TerritoryId > 0 && flag.MapId > 0;
+            _config.Save();
+        }
+
+        var instance = flag.Instance;
+        ImGui.SetNextItemWidth(80);
+        if (ImGui.InputInt("Instance (0 = none)", ref instance))
+        {
+            flag.Instance = Math.Clamp(instance, 0, 9);
+            _config.Save();
+        }
+
+        var x = flag.X;
+        ImGui.SetNextItemWidth(100);
+        if (ImGui.InputFloat("X", ref x, 0.1f))
+        {
+            flag.X = x;
+            _config.Save();
+        }
+
+        ImGui.SameLine();
+        var y = flag.Y;
+        ImGui.SetNextItemWidth(100);
+        if (ImGui.InputFloat("Y", ref y, 0.1f))
+        {
+            flag.Y = y;
+            _config.Save();
         }
 
         ImGui.Spacing();
+
+        if (flag.HasLocation)
+        {
+            if (ImGui.Button("Ping My Map"))
+            {
+                if (!MapLinkHelper.OpenMap(_gameGui, flag))
+                    _lastPostResult = "Could not open the map with that location — double-check Territory ID / Map ID.";
+            }
+            ImGui.SameLine();
+        }
+
         if (ImGui.Button("Copy Message"))
         {
             ImGui.SetClipboardText(FlagMessageHelper.BuildChatMessage(flag));
         }
         ImGui.SameLine();
+
+        if (flag.HasLocation)
+        {
+            if (ImGui.Button("Save to Library"))
+            {
+                _config.SavedLocations.Add(new SavedLocation
+                {
+                    Name = flag.Label,
+                    TerritoryId = flag.TerritoryId,
+                    MapId = flag.MapId,
+                    Instance = flag.Instance,
+                    X = flag.X,
+                    Y = flag.Y,
+                });
+                _config.Save();
+            }
+            ImGui.SameLine();
+        }
+
         if (ImGui.Button("Remove"))
         {
             onRemove();
@@ -546,6 +682,90 @@ public sealed class Plugin : IDalamudPlugin
         {
             _config.PollIntervalSeconds = Math.Clamp(pollInterval, 1, 30);
             _config.Save();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextWrapped(
+            "Saved Locations — reusable rally points. Set one up once with real coordinates, and " +
+            "it's a one-click add on the Flags tab for every future train."
+        );
+        ImGui.Spacing();
+
+        DrawSavedLocationsList();
+    }
+
+    private void DrawSavedLocationsList()
+    {
+        int? toRemove = null;
+
+        for (var i = 0; i < _config.SavedLocations.Count; i++)
+        {
+            ImGui.PushID(i);
+            var loc = _config.SavedLocations[i];
+            var instancePart = loc.Instance > 0 ? $", Instance {loc.Instance}" : "";
+            ImGui.TextWrapped($"{loc.Name} — Territory {loc.TerritoryId}, Map {loc.MapId}{instancePart} — ({loc.X:F1}, {loc.Y:F1})");
+            if (ImGui.Button("Remove"))
+            {
+                toRemove = i;
+            }
+            ImGui.Separator();
+            ImGui.PopID();
+        }
+
+        if (toRemove.HasValue)
+        {
+            _config.SavedLocations.RemoveAt(toRemove.Value);
+            _config.Save();
+        }
+
+        ImGui.Spacing();
+        ImGui.TextWrapped("Add a new saved location:");
+
+        ImGui.SetNextItemWidth(200);
+        ImGui.InputText("Name", ref _newLocationName, 128);
+
+        ImGui.SetNextItemWidth(120);
+        ImGui.InputInt("Territory ID##new", ref _newLocationTerritory);
+
+        ImGui.SetNextItemWidth(120);
+        ImGui.InputInt("Map ID##new", ref _newLocationMap);
+
+        ImGui.SetNextItemWidth(80);
+        ImGui.InputInt("Instance (0 = none)##new", ref _newLocationInstance);
+
+        ImGui.SetNextItemWidth(100);
+        ImGui.InputFloat("X##new", ref _newLocationX, 0.1f);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(100);
+        ImGui.InputFloat("Y##new", ref _newLocationY, 0.1f);
+
+        if (ImGui.Button("+ Add Saved Location"))
+        {
+            if (string.IsNullOrWhiteSpace(_newLocationName) || _newLocationTerritory <= 0 || _newLocationMap <= 0)
+            {
+                _lastPostResult = "Enter a name, Territory ID, and Map ID before adding a saved location.";
+            }
+            else
+            {
+                _config.SavedLocations.Add(new SavedLocation
+                {
+                    Name = _newLocationName,
+                    TerritoryId = (uint)_newLocationTerritory,
+                    MapId = (uint)_newLocationMap,
+                    Instance = Math.Clamp(_newLocationInstance, 0, 9),
+                    X = _newLocationX,
+                    Y = _newLocationY,
+                });
+                _config.Save();
+                _newLocationName = string.Empty;
+                _newLocationTerritory = 0;
+                _newLocationMap = 0;
+                _newLocationInstance = 0;
+                _newLocationX = 0;
+                _newLocationY = 0;
+            }
         }
     }
 
