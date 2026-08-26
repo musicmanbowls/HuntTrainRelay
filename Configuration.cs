@@ -5,33 +5,57 @@ using System.Collections.Generic;
 
 namespace HuntTrainRelay;
 
+public enum SpawnStatus { Unknown, Spawned, NotSpawned }
+
+[Serializable]
+public class WebhookEntry
+{
+    public bool Enabled { get; set; } = true;
+    public string Label { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+}
+
+[Serializable]
+public class FlagEntry
+{
+    public string Label { get; set; } = string.Empty;
+    public bool IsSRank { get; set; } = false;
+    public SpawnStatus SpawnStatus { get; set; } = SpawnStatus.Unknown;
+
+    public bool HasLocation { get; set; } = false;
+    public uint TerritoryId { get; set; } = 0;
+    public uint MapId { get; set; } = 0;
+    public int Instance { get; set; } = 0;
+    public float X { get; set; } = 0;
+    public float Y { get; set; } = 0;
+}
+
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
 
     /// <summary>
-    /// Discord "Incoming Webhook" URLs, created in Discord via Channel Settings >
-    /// Integrations > Webhooks > New Webhook > Copy Webhook URL. Every report is
-    /// posted to every non-empty URL in this list, so multiple Discord servers can
-    /// each get their own copy. Anyone with one of these URLs can post to that
-    /// channel, so treat them like passwords.
+    /// Discord webhooks. Enabled controls whether this one gets posted to at
+    /// all — e.g. a testing channel can sit here disabled without needing to be
+    /// removed. Label is just for your own reference (which server is which).
     /// </summary>
-    public List<string> WebhookUrls { get; set; } = new() { string.Empty };
+    public List<WebhookEntry> Webhooks { get; set; } = new() { new WebhookEntry() };
+
+    /// <summary>Legacy field from before per-webhook Enabled/Label. Migrated once.</summary>
+    [Obsolete("Use Webhooks instead. Kept only for migrating old saved configs.")]
+    public List<string>? WebhookUrls { get; set; }
 
     /// <summary>
-    /// Legacy single-webhook field from before multi-webhook support. Only kept so
-    /// existing saved configs migrate into WebhookUrls automatically; not used
-    /// otherwise.
+    /// S-rank watches and Rally Flags for the current train. Empty at the start
+    /// of every train — conductors add what they want, it clears on Reset or a
+    /// successful End Train Now, same lifecycle as tracking itself.
     /// </summary>
-    [Obsolete("Use WebhookUrls instead. Kept only for migrating old saved configs.")]
-    public string? WebhookUrl { get; set; }
+    public List<FlagEntry> Flags { get; set; } = new();
 
     /// <summary>
-    /// Turns on background tracking of kill times for this train. Only the
-    /// conductor actively recording in Hunt Helper needs this on. Reporting
-    /// itself is always manual via "End Train Now" — this setting only affects
-    /// how accurate the recorded kill times are, not whether anything gets posted.
+    /// Only the conductor actively recording the train should have this on,
+    /// to avoid two clients both posting the same "train complete" message.
     /// </summary>
     public bool TrackingEnabled { get; set; } = false;
 
@@ -56,18 +80,22 @@ public class Configuration : IPluginConfiguration
         _pluginInterface = pluginInterface;
 
 #pragma warning disable CS0618 // reading the obsolete field deliberately, once, to migrate it
-        if ((WebhookUrls == null || WebhookUrls.Count == 0 || WebhookUrls.TrueForAll(string.IsNullOrWhiteSpace))
-            && !string.IsNullOrWhiteSpace(WebhookUrl))
+        if ((Webhooks == null || Webhooks.Count == 0) && WebhookUrls is { Count: > 0 })
         {
-            WebhookUrls = new List<string> { WebhookUrl! };
-            WebhookUrl = null;
+            Webhooks = new List<WebhookEntry>();
+            foreach (var url in WebhookUrls)
+            {
+                if (!string.IsNullOrWhiteSpace(url))
+                    Webhooks.Add(new WebhookEntry { Enabled = true, Label = string.Empty, Url = url });
+            }
+            WebhookUrls = null;
             Save();
         }
 #pragma warning restore CS0618
 
-        if (WebhookUrls == null || WebhookUrls.Count == 0)
+        if (Webhooks == null || Webhooks.Count == 0)
         {
-            WebhookUrls = new List<string> { string.Empty };
+            Webhooks = new List<WebhookEntry> { new WebhookEntry() };
         }
     }
 

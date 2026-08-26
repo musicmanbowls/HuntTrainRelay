@@ -15,7 +15,7 @@ public static class DiscordRelay
     // Discord embed side-bar colour (a calm green). Decimal form of hex 2ECC71.
     private const int EmbedColor = 3066993;
 
-    public static Task<(bool Success, string Message)> PostTestAsync(List<string> webhookUrls)
+    public static Task<(bool Success, string Message)> PostTestAsync(List<WebhookEntry> webhooks)
     {
         var payload = new
         {
@@ -30,10 +30,10 @@ public static class DiscordRelay
             },
         };
 
-        return SendToAllAsync(webhookUrls, payload);
+        return SendToAllAsync(webhooks, payload);
     }
 
-    public static Task<(bool Success, string Message)> PostScoutingReportAsync(List<string> webhookUrls, List<HuntHelperMobRecord> marks, List<string> scoutNames)
+    public static Task<(bool Success, string Message)> PostScoutingReportAsync(List<WebhookEntry> webhooks, List<HuntHelperMobRecord> marks, List<string> scoutNames)
     {
         if (marks.Count == 0)
             return Task.FromResult((false, "Nothing to report — Hunt Helper's train list is empty."));
@@ -74,16 +74,17 @@ public static class DiscordRelay
             },
         };
 
-        return SendToAllAsync(webhookUrls, payload);
+        return SendToAllAsync(webhooks, payload);
     }
 
-    public static Task<(bool Success, string Message)> PostTrainCompleteAsync(List<string> webhookUrls, List<TrackedMark> marks, string? endedBy)
+    public static Task<(bool Success, string Message)> PostTrainCompleteAsync(List<WebhookEntry> webhooks, List<TrackedMark> marks, string? endedBy, List<FlagEntry>? flags = null)
     {
         var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var endedByLine = string.IsNullOrWhiteSpace(endedBy) ? "" : $"\nEnded by {endedBy}";
         var body = BuildChronologicalBody(marks);
+        var flagFooter = BuildFlagFooter(flags);
 
-        var chunks = ChunkByLength(body, 3800);
+        var chunks = ChunkByLength(body + flagFooter, 3800);
         var embeds = new List<object>();
         for (var i = 0; i < chunks.Count; i++)
         {
@@ -98,7 +99,34 @@ public static class DiscordRelay
         }
 
         var payload = new { embeds };
-        return SendToAllAsync(webhookUrls, payload);
+        return SendToAllAsync(webhooks, payload);
+    }
+
+    /// <summary>
+    /// S-rank watch results for the train (Spawned / Didn't Spawn / never
+    /// checked) — Rally Flags are deliberately left out of the Discord report,
+    /// since they're a live in-game coordination tool, not something that needs
+    /// to live on in a historical record.
+    /// </summary>
+    private static string BuildFlagFooter(List<FlagEntry>? flags)
+    {
+        var sRanks = (flags ?? new List<FlagEntry>()).Where(f => f.IsSRank).ToList();
+        if (sRanks.Count == 0) return string.Empty;
+
+        var sb = new StringBuilder();
+        sb.Append("\n**S-Rank Checks**\n");
+        foreach (var f in sRanks)
+        {
+            var status = f.SpawnStatus switch
+            {
+                SpawnStatus.Spawned => "Spawned",
+                SpawnStatus.NotSpawned => "Did not spawn",
+                _ => "Not checked",
+            };
+            sb.Append($"{f.Label} — {status}\n");
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>
@@ -180,19 +208,21 @@ public static class DiscordRelay
     }
 
     /// <summary>
-    /// Posts the same payload to every configured, non-empty webhook URL (e.g. one
-    /// per Discord server). Reports full success only if every target succeeded;
-    /// otherwise names which ones failed and why.
+    /// Posts the same payload to every enabled, non-empty webhook (e.g. one per
+    /// Discord server) — disabled entries (like a testing channel toggled off)
+    /// are skipped entirely. Reports full success only if every enabled target
+    /// succeeded; otherwise names which ones failed and why.
     /// </summary>
-    private static async Task<(bool Success, string Message)> SendToAllAsync(List<string>? webhookUrls, object payload)
+    private static async Task<(bool Success, string Message)> SendToAllAsync(List<WebhookEntry>? webhooks, object payload)
     {
-        var targets = (webhookUrls ?? new List<string>())
-            .Where(u => !string.IsNullOrWhiteSpace(u))
+        var targets = (webhooks ?? new List<WebhookEntry>())
+            .Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Url))
+            .Select(w => w.Url)
             .Distinct()
             .ToList();
 
         if (targets.Count == 0)
-            return (false, "No webhook URL configured.");
+            return (false, "No enabled webhook configured.");
 
         var json = JsonConvert.SerializeObject(payload);
         var successCount = 0;

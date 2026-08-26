@@ -22,6 +22,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
     private readonly IObjectTable _objectTable;
+    private readonly IGameGui _gameGui;
     private readonly IPluginLog _log;
 
     private readonly Configuration _config;
@@ -30,6 +31,10 @@ public sealed class Plugin : IDalamudPlugin
 
     private bool _configWindowVisible;
     private string _lastPostResult = string.Empty;
+    private int _selectedSRankIndex;
+
+    private static readonly List<SRankInfo> SRankChoices =
+        SRankData.All.OrderBy(s => s.Order).ThenBy(s => s.Name).ToList();
 
     public Plugin(
         IDalamudPluginInterface pluginInterface,
@@ -37,12 +42,14 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IChatGui chatGui,
         IObjectTable objectTable,
+        IGameGui gameGui,
         IPluginLog pluginLog)
     {
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
         _chatGui = chatGui;
         _objectTable = objectTable;
+        _gameGui = gameGui;
         _log = pluginLog;
 
         _config = _pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
@@ -67,22 +74,14 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>
     /// Builds the current merged mark set — Hunt Helper's live list plus anything
     /// the background tracker already recorded that's no longer in that live list
-    /// (e.g. cleared away mid-train with Remove Dead). This is exactly what "End
-    /// Train Now" posts and what the "Marks Slain" tab previews — kept as one
-    /// method so those two can never show different data. Returns null if Hunt
-    /// Helper isn't detected at all.
+    /// (e.g. cleared away mid-train with Remove Dead). Returns null if Hunt Helper
+    /// isn't detected at all.
     /// </summary>
     private List<TrackedMark>? BuildCurrentMarks()
     {
         var list = _ipc.TryGetTrainList();
         if (list == null) return null;
 
-        // Prefer a death time the background tracker actually observed live
-        // (accurate to the moment it happened). Hunt Helper's own LastSeenUTC
-        // isn't a reliable stand-in for time-of-death — it can be stale for a
-        // mark that's been dead a while — so for anything never personally
-        // observed transitioning, treat right now as the reference time instead
-        // of trusting that field.
         var now = DateTime.UtcNow;
         var tracked = _watcher.GetTrackedSnapshot();
 
@@ -98,10 +97,6 @@ public sealed class Plugin : IDalamudPlugin
                 : null,
         }).ToList();
 
-        // Fold in anything the background tracker already recorded that isn't in
-        // Hunt Helper's current live list at all — e.g. marks cleared away with
-        // Remove Dead earlier in the train. Without this, a report would still
-        // under-report marks that genuinely died as part of it.
         var seenKeys = marks.Select(m => (m.ModelId, m.Instance)).ToHashSet();
         foreach (var (key, trackedMark) in tracked)
         {
@@ -114,7 +109,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private async Task SendTestAsync()
     {
-        var (success, message) = await DiscordRelay.PostTestAsync(_config.WebhookUrls);
+        var (success, message) = await DiscordRelay.PostTestAsync(_config.Webhooks);
         _lastPostResult = message;
         if (!success) _log.Error($"Hunt Train Relay test post failed: {message}");
     }
@@ -133,7 +128,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!string.IsNullOrWhiteSpace(selfName)) names.Add(selfName);
         names.AddRange(_config.AdditionalScouts.Where(n => !string.IsNullOrWhiteSpace(n)));
 
-        var (success, message) = await DiscordRelay.PostScoutingReportAsync(_config.WebhookUrls, list, names);
+        var (success, message) = await DiscordRelay.PostScoutingReportAsync(_config.Webhooks, list, names);
         _lastPostResult = message;
         if (!success) _log.Error($"Hunt Train Relay scouting report failed: {message}");
     }
@@ -141,12 +136,9 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>
     /// The only way a "Train Complete" report ever gets posted — reads the
     /// current merged mark set and posts it sorted by the actual order things
-    /// died. Deliberately manual rather than automatic: "everything currently
-    /// tracked is dead" fires too early on multi-expansion trains, the moment
-    /// the first leg looks cleared, well before the real end. Tracking is only
-    /// cleared once the post is confirmed to have actually succeeded — if it
-    /// fails (bad webhook, network issue), the data stays put so End Train Now
-    /// can just be tried again instead of losing everything.
+    /// died, plus any S-rank check results. Tracking and the flag list only
+    /// clear once the post is confirmed to have actually succeeded — if it
+    /// fails, everything stays put so this can just be tried again.
     /// </summary>
     private async Task EndTrainNowAsync()
     {
@@ -165,13 +157,15 @@ public sealed class Plugin : IDalamudPlugin
 
         var endedBy = _objectTable.LocalPlayer?.Name?.TextValue;
 
-        var (success, message) = await DiscordRelay.PostTrainCompleteAsync(_config.WebhookUrls, marks, endedBy);
+        var (success, message) = await DiscordRelay.PostTrainCompleteAsync(_config.Webhooks, marks, endedBy, _config.Flags);
         _lastPostResult = message;
 
         if (success)
         {
             _chatGui.Print($"[Hunt Train Relay] Posted train summary to Discord ({marks.Count} marks).");
             _watcher.ResetNow();
+            _config.Flags.Clear();
+            _config.Save();
         }
         else
         {
@@ -184,7 +178,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (!_configWindowVisible) return;
 
-        ImGui.SetNextWindowSize(new Vector2(460, 440), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(480, 480), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Hunt Train Relay", ref _configWindowVisible))
         {
             if (ImGui.BeginTabBar("HuntTrainRelayTabs"))
@@ -198,6 +192,12 @@ public sealed class Plugin : IDalamudPlugin
                 if (ImGui.BeginTabItem("Scout"))
                 {
                     DrawScoutTab();
+                    ImGui.EndTabItem();
+                }
+
+                if (ImGui.BeginTabItem("Flags"))
+                {
+                    DrawFlagsTab();
                     ImGui.EndTabItem();
                 }
 
@@ -249,14 +249,16 @@ public sealed class Plugin : IDalamudPlugin
         {
             _ = EndTrainNowAsync();
         }
-        ImGui.TextDisabled("Posts the report, sorted by the order marks actually died. Only clears tracking once the post actually succeeds.");
+        ImGui.TextDisabled("Posts the report, sorted by the order marks actually died. Only clears tracking and the flag list once the post actually succeeds.");
 
         ImGui.Spacing();
         if (ImGui.Button("Reset train tracking now"))
         {
             _watcher.ResetNow();
+            _config.Flags.Clear();
+            _config.Save();
         }
-        ImGui.TextDisabled("Clears tracking without posting anything — use if you need to abandon a train.");
+        ImGui.TextDisabled("Clears tracking and the flag list without posting anything — use if you need to abandon a train.");
     }
 
     private void DrawScoutTab()
@@ -284,6 +286,161 @@ public sealed class Plugin : IDalamudPlugin
             "+ Add scout",
             $"Maximum of {MaxAdditionalScouts} additional scouts reached.");
         ImGui.PopID();
+    }
+
+    private void DrawFlagsTab()
+    {
+        ImGui.Spacing();
+        ImGui.TextWrapped("S-rank watches and Rally Flags for this train. Clears when the train ends (Reset or a successful End Train Now).");
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // --- Add S-rank ---
+        ImGui.TextWrapped("Add an S-rank to watch for:");
+        var choiceLabels = SRankChoices.Select(s => $"{s.Expansion} — {s.Name}").ToArray();
+        if (choiceLabels.Length > 0)
+        {
+            ImGui.SetNextItemWidth(320);
+            ImGui.Combo("##sRankChoice", ref _selectedSRankIndex, choiceLabels, choiceLabels.Length);
+            ImGui.SameLine();
+            if (ImGui.Button("Add S-Rank"))
+            {
+                var chosen = SRankChoices[_selectedSRankIndex];
+                _config.Flags.Add(new FlagEntry { Label = chosen.Name, IsSRank = true });
+                _config.Save();
+            }
+        }
+
+        ImGui.Spacing();
+        if (ImGui.Button("Add Rally Flag"))
+        {
+            _config.Flags.Add(new FlagEntry { Label = "New Rally Flag", IsSRank = false });
+            _config.Save();
+        }
+        ImGui.TextDisabled("For a location planned ahead of time (e.g. an aetheryte to meet at before switching instance).");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        int? toRemove = null;
+        for (var i = 0; i < _config.Flags.Count; i++)
+        {
+            ImGui.PushID(i);
+            DrawFlagEntry(_config.Flags[i], () => toRemove = i);
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.PopID();
+        }
+
+        if (toRemove.HasValue)
+        {
+            _config.Flags.RemoveAt(toRemove.Value);
+            _config.Save();
+        }
+    }
+
+    private void DrawFlagEntry(FlagEntry flag, Action onRemove)
+    {
+        if (flag.IsSRank)
+        {
+            ImGui.TextWrapped($"[S-Rank] {flag.Label}");
+
+            var spawned = flag.SpawnStatus == SpawnStatus.Spawned;
+            var notSpawned = flag.SpawnStatus == SpawnStatus.NotSpawned;
+
+            if (ImGui.Checkbox("Spawned", ref spawned))
+            {
+                flag.SpawnStatus = spawned ? SpawnStatus.Spawned : SpawnStatus.Unknown;
+                _config.Save();
+            }
+            ImGui.SameLine();
+            if (ImGui.Checkbox("Didn't Spawn", ref notSpawned))
+            {
+                flag.SpawnStatus = notSpawned ? SpawnStatus.NotSpawned : SpawnStatus.Unknown;
+                _config.Save();
+            }
+        }
+        else
+        {
+            var label = flag.Label;
+            ImGui.SetNextItemWidth(300);
+            if (ImGui.InputText("Label", ref label, 256))
+            {
+                flag.Label = label;
+            }
+            if (ImGui.IsItemDeactivatedAfterEdit()) _config.Save();
+        }
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("Location — read these off the game's own map after placing a flag there (Ctrl+Right-Click).");
+
+        var territory = (int)flag.TerritoryId;
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.InputInt("Territory ID", ref territory))
+        {
+            flag.TerritoryId = (uint)Math.Max(0, territory);
+            _config.Save();
+        }
+
+        var map = (int)flag.MapId;
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.InputInt("Map ID", ref map))
+        {
+            flag.MapId = (uint)Math.Max(0, map);
+            _config.Save();
+        }
+
+        var instance = flag.Instance;
+        ImGui.SetNextItemWidth(80);
+        if (ImGui.InputInt("Instance (0 = none)", ref instance))
+        {
+            flag.Instance = Math.Clamp(instance, 0, 9);
+            _config.Save();
+        }
+
+        var x = flag.X;
+        ImGui.SetNextItemWidth(100);
+        if (ImGui.InputFloat("X", ref x, 0.1f))
+        {
+            flag.X = x;
+            _config.Save();
+        }
+
+        ImGui.SameLine();
+        var y = flag.Y;
+        ImGui.SetNextItemWidth(100);
+        if (ImGui.InputFloat("Y", ref y, 0.1f))
+        {
+            flag.Y = y;
+            _config.Save();
+        }
+
+        flag.HasLocation = flag.TerritoryId > 0 && flag.MapId > 0;
+
+        ImGui.Spacing();
+
+        if (flag.HasLocation)
+        {
+            if (ImGui.Button("Ping My Map"))
+            {
+                if (!MapLinkHelper.OpenMap(_gameGui, flag))
+                    _lastPostResult = "Could not open the map with that location — double-check Territory ID / Map ID.";
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Copy Coordinates"))
+            {
+                ImGui.SetClipboardText(MapLinkHelper.CoordinateText(flag));
+            }
+            ImGui.SameLine();
+        }
+
+        if (ImGui.Button("Remove"))
+        {
+            onRemove();
+        }
     }
 
     private void DrawMarksSlainTab()
@@ -354,22 +511,18 @@ public sealed class Plugin : IDalamudPlugin
         {
             _ = SendTestAsync();
         }
+        ImGui.TextDisabled("Posts to every ENABLED webhook below.");
 
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.TextWrapped(
-            "Webhook URLs — one per Discord server you want this to post to. Create one in " +
-            "Discord via Channel Settings > Integrations > Webhooks > New Webhook > Copy Webhook URL."
+            "Webhooks — one per Discord server (or channel) to post to. Untick Enabled to keep a " +
+            "testing channel around without deleting it. Create a webhook in Discord via Channel " +
+            "Settings > Integrations > Webhooks > New Webhook > Copy Webhook URL."
         );
         ImGui.Spacing();
 
-        ImGui.PushID("webhooks");
-        DrawStringList(
-            _config.WebhookUrls,
-            MaxWebhooks,
-            "+ Add webhook",
-            $"Maximum of {MaxWebhooks} webhooks reached.");
-        ImGui.PopID();
+        DrawWebhookList();
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -382,10 +535,77 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private void DrawWebhookList()
+    {
+        int? toRemove = null;
+
+        for (var i = 0; i < _config.Webhooks.Count; i++)
+        {
+            ImGui.PushID(i);
+            var hook = _config.Webhooks[i];
+
+            var enabled = hook.Enabled;
+            if (ImGui.Checkbox("##enabled", ref enabled))
+            {
+                hook.Enabled = enabled;
+                _config.Save();
+            }
+
+            ImGui.SameLine();
+            var label = hook.Label;
+            ImGui.SetNextItemWidth(120);
+            if (ImGui.InputTextWithHint("##label", "Label (optional)", ref label, 128))
+            {
+                hook.Label = label;
+            }
+            if (ImGui.IsItemDeactivatedAfterEdit()) _config.Save();
+
+            ImGui.SameLine();
+            var url = hook.Url;
+            ImGui.SetNextItemWidth(220);
+            if (ImGui.InputTextWithHint("##url", "Webhook URL", ref url, 512))
+            {
+                hook.Url = url;
+            }
+            if (ImGui.IsItemDeactivatedAfterEdit()) _config.Save();
+
+            if (_config.Webhooks.Count > 1)
+            {
+                ImGui.SameLine();
+                if (ImGui.Button("Remove"))
+                {
+                    toRemove = i;
+                }
+            }
+
+            ImGui.PopID();
+        }
+
+        if (toRemove.HasValue)
+        {
+            _config.Webhooks.RemoveAt(toRemove.Value);
+            if (_config.Webhooks.Count == 0) _config.Webhooks.Add(new WebhookEntry());
+            _config.Save();
+        }
+
+        if (_config.Webhooks.Count < MaxWebhooks)
+        {
+            if (ImGui.Button("+ Add webhook"))
+            {
+                _config.Webhooks.Add(new WebhookEntry());
+                _config.Save();
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled($"Maximum of {MaxWebhooks} webhooks reached.");
+        }
+    }
+
     /// <summary>
-    /// Reusable add/remove list editor — used for both webhook URLs and
-    /// additional scout names. Caller must wrap the call in ImGui.PushID/PopID
-    /// with a unique key so the two lists' internal item IDs never collide.
+    /// Reusable add/remove list editor for simple string lists (currently just
+    /// additional scouts). Caller must wrap the call in ImGui.PushID with a
+    /// unique key if more than one such list is ever drawn in the same window.
     /// </summary>
     private void DrawStringList(List<string> list, int maxCount, string addLabel, string maxReachedLabel)
     {

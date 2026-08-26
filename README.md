@@ -44,23 +44,46 @@ Treat the webhook URL like a password — anyone who has it can post to that cha
   how many dead, waiting for Hunt Helper, etc.).
 - *End Train Now*: the only way a report gets sent. Posts every mark tracked
   this train — including ones cleared away mid-train with Hunt Helper's own
-  "Remove Dead" — sorted by the order they actually died, then clears tracking
+  "Remove Dead" — sorted by the order they actually died, plus any S-rank
+  check results from the Flags tab, then clears tracking and the flag list
   for the next train. Deliberately manual: for multi-expansion trains (e.g.
   Dawntrail → Shadowbringers → Endwalker), auto-firing the moment "everything
   currently tracked is dead" would fire after the *first* leg, not the real end.
-- *Reset train tracking now*: clears tracking without posting anything — use
-  if you need to abandon a train partway through.
+- *Reset train tracking now*: clears tracking and the flag list without
+  posting anything — use if you need to abandon a train partway through.
 
 **Scout**
 - *Send Scouting Report*: posts a paste-able Hunt Helper import code, plus how
   many marks are currently up per expansion — including which specific marks
   were found already dead ("sniped") and which haven't been scouted at all yet.
+- *Additional scouts*: credit anyone else whose scouting you folded into this
+  report (e.g. they sent you their own Hunt Helper export code privately).
+
+**Flags**
+- *Add S-Rank*: pick any S-rank from the dropdown (sorted by expansion) to
+  start watching for it this train. Each one gets Spawned / Didn't Spawn
+  checkboxes, and shows up on the eventual Discord report either way.
+- *Add Rally Flag*: a location planned ahead of time — e.g. an aetheryte to
+  meet at before everyone switches instance. Doesn't appear on the Discord
+  report; it's a live, in-the-moment coordination tool, not a historical record.
+- *Location*: type in Territory ID, Map ID, optional instance, and X/Y —
+  read these off the game's own map after placing a flag there yourself
+  (Ctrl+Right-Click). Once a location's filled in, **Ping My Map** opens your
+  own map with the flag placed, and **Copy Coordinates** puts plain text on
+  your clipboard to paste into Say/Shout. (A real clickable link in chat isn't
+  supported yet — that needs a mechanism I haven't verified works safely.)
+- The whole list clears when the train ends, same as tracking.
+
+**Marks Slain**
+- Live preview of exactly what End Train Now would post right now, in your
+  own local time — a way to sanity-check before actually sending it.
 
 **Settings**
-- *Send test message*: posts a simple test message to confirm the webhook(s)
-  work.
-- *Webhook URLs*: one row per Discord server to post reports to. Add up to 5
-  with the **+ Add webhook** button.
+- *Send test message*: posts to every **enabled** webhook below, to confirm
+  they're wired up correctly.
+- *Webhooks*: one row per Discord server or channel — a checkbox to enable/
+  disable it (handy for a testing channel you don't want to delete), an
+  optional short label, and the URL itself. Add up to 5 with **+ Add webhook**.
 - *Check interval (seconds)*: how often (while "Tracking this train" is on) it
   checks Hunt Helper for changes — this is what determines how precisely a
   kill time is recorded. 3 seconds is fine for most people.
@@ -75,6 +98,9 @@ Treat the webhook URL like a password — anyone who has it can post to that cha
 - "Assumed Sniped" (on End Train Now) and "Not yet scouted" (on Scouting
   Report) both check whether a named mark was seen at all, not whether every
   concurrent instance of its zone was checked.
+- Flag locations are entered manually (Territory ID / Map ID / X / Y read off
+  the in-game map) rather than auto-captured — there's no verified way to read
+  a currently-placed flag back out of the game safely.
 
 ## For whoever maintains this (build from source)
 

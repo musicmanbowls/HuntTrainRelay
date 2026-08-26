@@ -99,8 +99,16 @@ public class TrainWatcher : IDisposable
 
         if (list.Count == 0)
         {
-            _tracked.Clear();
-            LastStatus = "No active train recorded in Hunt Helper.";
+            // Nothing currently sitting in Hunt Helper's list — but that doesn't
+            // mean clear retained history. A conductor mid-train can briefly empty
+            // Hunt Helper's list this way (e.g. Remove Dead clearing a finished
+            // leg right before the next expansion's marks get detected), and that
+            // shouldn't lose anything already tracked. Tracking only ever clears
+            // via an explicit Reset or a successful End Train Now.
+            var deadCountEmpty = _tracked.Values.Count(m => m.Dead);
+            LastStatus = _tracked.Count > 0
+                ? $"Tracking {_tracked.Count} marks, {deadCountEmpty} dead. (Hunt Helper's list is currently empty.)"
+                : "No active train recorded in Hunt Helper.";
             return;
         }
 
