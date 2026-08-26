@@ -3,8 +3,9 @@
 Connects Hunt Helper to Discord. Records the exact moment each mark dies in the
 background, then — when you click **End Train Now** — posts a report sorted by
 the order things actually died, with each mark's estimated respawn window shown
-in every Discord reader's own local time. It can also post a scouting report on
-demand, including a code that pastes straight into anyone else's Hunt Helper.
+in every Discord reader's own local time. Also tracks a small, fixed set of
+S-rank checks the group actually cares about, and can post an on-demand
+scouting report with a code that pastes straight into anyone else's Hunt Helper.
 
 ## Install
 
@@ -40,17 +41,20 @@ Treat the webhook URL like a password — anyone who has it can post to that cha
   exact moment each mark flips to dead — it doesn't post anything by itself.
   Only the person actually running Hunt Helper's train recorder should have
   this on.
-- *Status*: a live line showing what tracking currently sees (how many marks,
-  how many dead, waiting for Hunt Helper, etc.).
+- *Status*: a live line showing what tracking currently sees.
 - *End Train Now*: the only way a report gets sent. Posts every mark tracked
   this train — including ones cleared away mid-train with Hunt Helper's own
   "Remove Dead" — sorted by the order they actually died, plus any S-rank
-  check results from the Flags tab, then clears tracking and the flag list
-  for the next train. Deliberately manual: for multi-expansion trains (e.g.
-  Dawntrail → Shadowbringers → Endwalker), auto-firing the moment "everything
+  check results, then clears everything for the next train. Deliberately
+  manual: for multi-expansion trains, auto-firing the moment "everything
   currently tracked is dead" would fire after the *first* leg, not the real end.
-- *Reset train tracking now*: clears tracking and the flag list without
-  posting anything — use if you need to abandon a train partway through.
+- *Reset train tracking now*: clears tracking and S-rank watches without
+  posting anything — use if you need to abandon a train.
+- *S-Rank Watches*: three quick buttons — Ophioneus, Tyger, and Narrow-rift
+  (with a dropdown of its 9 known spawn spots, since it doesn't have one fixed
+  location like the other two). Each watch gets Spawned / Didn't Spawn
+  checkboxes and shows up on the eventual Discord report either way. Clears
+  when the train ends, same as tracking.
 
 **Scout**
 - *Send Scouting Report*: posts a paste-able Hunt Helper import code, plus how
@@ -59,46 +63,17 @@ Treat the webhook URL like a password — anyone who has it can post to that cha
 - *Additional scouts*: credit anyone else whose scouting you folded into this
   report (e.g. they sent you their own Hunt Helper export code privately).
 
-**Flags**
-- *Add S-Rank*: three quick buttons — Narrow-rift, Ophioneus, Tyger — the only
-  ones the group actually checks for during trains. Each gets Spawned / Didn't
-  Spawn checkboxes and shows up on the eventual Discord report either way.
-- *Add Rally Flag*: a location planned ahead of time — e.g. an aetheryte to
-  meet at before everyone switches instance. Doesn't appear on the Discord
-  report; it's a live, in-the-moment coordination tool, not a historical record.
-- *Location*: Territory ID, Map ID, optional instance, and X/Y — visible as
-  plain text under the label at all times, not hidden behind a button. Once
-  filled in: **Ping My Map** actually sets your own in-game flag to that spot
-  (not just a view — the same as Ctrl+Right-Clicking it yourself), and
-  **Copy Message** puts something like `Heritage Found Instance 1 — <flag>`
-  on your clipboard. Ping first, then Copy right after — the `<flag>`
-  placeholder (FFXIV's own built-in chat feature) resolves correctly to
-  wherever you just pinged when you paste and send.
-- *Save to Library*: turns a one-off location into a reusable one — see Saved
-  Locations below.
-- *Open Flag List Popup*: a small separate window, independent of the main
-  settings window, meant to sit on the side of your screen while conducting.
-  Same quick actions (spawn status, Ping, Copy) — adding/removing flags still
-  happens on this tab.
-- The whole list clears when the train ends, same as tracking.
-
-**Settings** also has a **Saved Locations** section — set up a rally point
-once with real coordinates, and it's a one-click "Add from Library" pick on
-the Flags tab for every future train, instead of retyping numbers each time.
-
 **Marks Slain**
 - Live preview of exactly what End Train Now would post right now, in your
   own local time — a way to sanity-check before actually sending it.
 
 **Settings**
-- *Send test message*: posts to every **enabled** webhook below, to confirm
-  they're wired up correctly.
+- *Send test message*: posts to every **enabled** webhook below.
 - *Webhooks*: one row per Discord server or channel — a checkbox to enable/
   disable it (handy for a testing channel you don't want to delete), an
-  optional short label, and the URL itself. Add up to 5 with **+ Add webhook**.
+  optional short label, and the URL itself. Add up to 5.
 - *Check interval (seconds)*: how often (while "Tracking this train" is on) it
-  checks Hunt Helper for changes — this is what determines how precisely a
-  kill time is recorded. 3 seconds is fine for most people.
+  checks Hunt Helper for changes. 3 seconds is fine for most people.
 
 ## Known limitations (by design)
 
@@ -110,11 +85,13 @@ the Flags tab for every future train, instead of retyping numbers each time.
 - "Assumed Sniped" (on End Train Now) and "Not yet scouted" (on Scouting
   Report) both check whether a named mark was seen at all, not whether every
   concurrent instance of its zone was checked.
+- S-rank watches are a fixed, small set (Ophioneus, Tyger, Narrow-rift) rather
+  than a general system — this was deliberately cut back after an earlier,
+  more flexible "Rally Flag" design turned out to be more trouble than it was
+  worth. A general reusable-location or map-flag system is not planned.
 
 ## For whoever maintains this (build from source)
 
-Source and the full build/publish walkthrough are in this repo if you ever
-need to change something — ask Claude, since that's who wrote it. Short
-version: `dotnet build -c Release`, zip `HuntTrainRelay.dll` +
-`HuntTrainRelay.json` from `bin\Release\`, attach that zip to a new GitHub
-Release, and update the version + download links in `repo.json`.
+`dotnet build -c Release`, zip `HuntTrainRelay.dll` + `HuntTrainRelay.json`
+from `bin\Release\`, attach that zip to a GitHub Release, and update the
+version + download links in `repo.json`.

@@ -2,7 +2,6 @@ using Dalamud.Configuration;
 using Dalamud.Plugin;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace HuntTrainRelay;
 
@@ -16,41 +15,21 @@ public class WebhookEntry
     public string Url { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// An S-rank watch for the current train. Label is the display text (mark
+/// name, or mark name + which known spawn spot for Narrow-rift specifically).
+/// </summary>
 [Serializable]
 public class FlagEntry
 {
     public string Label { get; set; } = string.Empty;
-    public bool IsSRank { get; set; } = false;
     public SpawnStatus SpawnStatus { get; set; } = SpawnStatus.Unknown;
-
-    public bool HasLocation { get; set; } = false;
-    public uint TerritoryId { get; set; } = 0;
-    public uint MapId { get; set; } = 0;
-    public int Instance { get; set; } = 0;
-    public float X { get; set; } = 0;
-    public float Y { get; set; } = 0;
-}
-
-/// <summary>
-/// A reusable, named location — set up once with real coordinates, then picked
-/// from a dropdown on every future train instead of retyping numbers each time.
-/// Persists forever (unlike the per-train Flags list, which resets every train).
-/// </summary>
-[Serializable]
-public class SavedLocation
-{
-    public string Name { get; set; } = string.Empty;
-    public uint TerritoryId { get; set; } = 0;
-    public uint MapId { get; set; } = 0;
-    public int Instance { get; set; } = 0;
-    public float X { get; set; } = 0;
-    public float Y { get; set; } = 0;
 }
 
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 3;
+    public int Version { get; set; } = 4;
 
     /// <summary>
     /// Discord webhooks. Enabled controls whether this one gets posted to at
@@ -64,16 +43,11 @@ public class Configuration : IPluginConfiguration
     public List<string>? WebhookUrls { get; set; }
 
     /// <summary>
-    /// S-rank watches and Rally Flags for the current train. Empty at the start
-    /// of every train — conductors add what they want, it clears on Reset or a
-    /// successful End Train Now, same lifecycle as tracking itself.
+    /// S-rank watches for the current train. Empty at the start of every train —
+    /// conductors add what they want, it clears on Reset or a successful End
+    /// Train Now, same lifecycle as tracking itself.
     /// </summary>
     public List<FlagEntry> Flags { get; set; } = new();
-
-    /// <summary>
-    /// The reusable location library — persists across every train, unlike Flags.
-    /// </summary>
-    public List<SavedLocation> SavedLocations { get; set; } = new();
 
     /// <summary>
     /// Only the conductor actively recording the train should have this on,
@@ -118,33 +92,6 @@ public class Configuration : IPluginConfiguration
         if (Webhooks == null || Webhooks.Count == 0)
         {
             Webhooks = new List<WebhookEntry> { new WebhookEntry() };
-        }
-
-        // Seed Narrow-rift's known spawn points once (Territory 960 / Map 699,
-        // Ultima Thule — confirmed via arealmremapped.com; coordinates from
-        // ffxiv.consolegameswiki.com/wiki/Narrow-rift's own Coordinates table).
-        // Only adds these if none exist yet, so it never duplicates or disturbs
-        // anything already saved.
-        if (!SavedLocations.Any(l => l.Name.StartsWith("Narrow-rift", StringComparison.OrdinalIgnoreCase)))
-        {
-            var narrowRiftSpawns = new (float X, float Y)[]
-            {
-                (8.3f, 20.2f), (12.0f, 21.9f), (13.3f, 10.4f), (14.7f, 36.1f), (16.5f, 26.2f),
-                (17.6f, 30.3f), (19.2f, 9.8f), (20.7f, 34.0f), (27.9f, 12.6f),
-            };
-            for (var i = 0; i < narrowRiftSpawns.Length; i++)
-            {
-                SavedLocations.Add(new SavedLocation
-                {
-                    Name = $"Narrow-rift Spawn {i + 1}",
-                    TerritoryId = 960,
-                    MapId = 699,
-                    Instance = 0,
-                    X = narrowRiftSpawns[i].X,
-                    Y = narrowRiftSpawns[i].Y,
-                });
-            }
-            Save();
         }
     }
 

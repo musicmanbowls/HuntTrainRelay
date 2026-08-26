@@ -18,19 +18,23 @@ public sealed class Plugin : IDalamudPlugin
     private const int MaxWebhooks = 5;
     private const int MaxAdditionalScouts = 3;
 
-    // Only the S-ranks conductors actually check for during trains, per group feedback.
-    private static readonly (string Name, string Expansion)[] QuickSRanks =
+    // The only S-ranks the group actually checks for during trains.
+    private static readonly string[] SimpleSRanks = { "Ophioneus", "Tyger" };
+
+    // Narrow-rift's known spawn points (Territory 960 / Map 699, Ultima Thule —
+    // confirmed via arealmremapped.com; coordinates from Narrow-rift's own
+    // Coordinates table on ffxiv.consolegameswiki.com). Used only to label which
+    // spot is being watched — no location system attached anymore, just text.
+    private static readonly (float X, float Y)[] NarrowRiftSpawns =
     {
-        ("Narrow-rift", "Endwalker"),
-        ("Ophioneus", "Endwalker"),
-        ("Tyger", "Shadowbringers"),
+        (8.3f, 20.2f), (12.0f, 21.9f), (13.3f, 10.4f), (14.7f, 36.1f), (16.5f, 26.2f),
+        (17.6f, 30.3f), (19.2f, 9.8f), (20.7f, 34.0f), (27.9f, 12.6f),
     };
 
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
     private readonly IObjectTable _objectTable;
-    private readonly IGameGui _gameGui;
     private readonly IPluginLog _log;
 
     private readonly Configuration _config;
@@ -38,17 +42,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly TrainWatcher _watcher;
 
     private bool _configWindowVisible;
-    private bool _flagPopoutVisible;
     private string _lastPostResult = string.Empty;
-    private int _selectedSavedLocationIndex;
-
-    // New Saved Location form state (Settings tab)
-    private string _newLocationName = string.Empty;
-    private int _newLocationTerritory;
-    private int _newLocationMap;
-    private int _newLocationInstance;
-    private float _newLocationX;
-    private float _newLocationY;
+    private int _selectedNarrowRiftSpawn;
 
     public Plugin(
         IDalamudPluginInterface pluginInterface,
@@ -56,14 +51,12 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IChatGui chatGui,
         IObjectTable objectTable,
-        IGameGui gameGui,
         IPluginLog pluginLog)
     {
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
         _chatGui = chatGui;
         _objectTable = objectTable;
-        _gameGui = gameGui;
         _log = pluginLog;
 
         _config = _pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
@@ -150,7 +143,7 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>
     /// The only way a "Train Complete" report ever gets posted — reads the
     /// current merged mark set and posts it sorted by the actual order things
-    /// died, plus any S-rank check results. Tracking and the flag list only
+    /// died, plus any S-rank check results. Tracking and the watch list only
     /// clear once the post is confirmed to have actually succeeded — if it
     /// fails, everything stays put so this can just be tried again.
     /// </summary>
@@ -190,15 +183,9 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawUI()
     {
-        DrawMainWindow();
-        DrawFlagPopout();
-    }
-
-    private void DrawMainWindow()
-    {
         if (!_configWindowVisible) return;
 
-        ImGui.SetNextWindowSize(new Vector2(500, 520), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(460, 480), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Hunt Train Relay", ref _configWindowVisible))
         {
             if (ImGui.BeginTabBar("HuntTrainRelayTabs"))
@@ -212,12 +199,6 @@ public sealed class Plugin : IDalamudPlugin
                 if (ImGui.BeginTabItem("Scout"))
                 {
                     DrawScoutTab();
-                    ImGui.EndTabItem();
-                }
-
-                if (ImGui.BeginTabItem("Flags"))
-                {
-                    DrawFlagsTab();
                     ImGui.EndTabItem();
                 }
 
@@ -246,75 +227,6 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.End();
     }
 
-    /// <summary>
-    /// A small, separate always-available window listing the current flags —
-    /// meant to sit on the side of the screen while conducting, independent of
-    /// whether the main settings window is even open. Only quick actions here
-    /// (spawn status, ping, copy message); adding/removing flags stays on the
-    /// Flags tab in the main window.
-    /// </summary>
-    private void DrawFlagPopout()
-    {
-        if (!_flagPopoutVisible) return;
-
-        ImGui.SetNextWindowSize(new Vector2(320, 260), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin("Hunt Train Flags", ref _flagPopoutVisible))
-        {
-            if (_config.Flags.Count == 0)
-            {
-                ImGui.TextDisabled("No flags yet — add some on the Flags tab in the main window.");
-            }
-
-            foreach (var flag in _config.Flags)
-            {
-                ImGui.PushID(flag.GetHashCode());
-                ImGui.TextWrapped(flag.IsSRank ? $"[S] {flag.Label}" : flag.Label);
-
-                if (flag.HasLocation)
-                {
-                    ImGui.TextDisabled(MapLinkHelper.CoordinateSummary(flag));
-                }
-
-                if (flag.IsSRank)
-                {
-                    var spawned = flag.SpawnStatus == SpawnStatus.Spawned;
-                    var notSpawned = flag.SpawnStatus == SpawnStatus.NotSpawned;
-
-                    if (ImGui.Checkbox("Up", ref spawned))
-                    {
-                        flag.SpawnStatus = spawned ? SpawnStatus.Spawned : SpawnStatus.Unknown;
-                        _config.Save();
-                    }
-                    ImGui.SameLine();
-                    if (ImGui.Checkbox("Not up", ref notSpawned))
-                    {
-                        flag.SpawnStatus = notSpawned ? SpawnStatus.NotSpawned : SpawnStatus.Unknown;
-                        _config.Save();
-                    }
-                    ImGui.SameLine();
-                }
-
-                if (flag.HasLocation)
-                {
-                    if (ImGui.Button("Ping"))
-                    {
-                        MapLinkHelper.OpenMap(_gameGui, flag);
-                    }
-                    ImGui.SameLine();
-                }
-
-                if (ImGui.Button("Copy"))
-                {
-                    ImGui.SetClipboardText(FlagMessageHelper.BuildChatMessage(flag));
-                }
-
-                ImGui.Separator();
-                ImGui.PopID();
-            }
-        }
-        ImGui.End();
-    }
-
     private void DrawConductorTab()
     {
         ImGui.Spacing();
@@ -338,7 +250,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             _ = EndTrainNowAsync();
         }
-        ImGui.TextDisabled("Posts the report, sorted by the order marks actually died. Only clears tracking and the flag list once the post actually succeeds.");
+        ImGui.TextDisabled("Posts the report, sorted by the order marks actually died, plus any S-rank checks below. Only clears once the post actually succeeds.");
 
         ImGui.Spacing();
         if (ImGui.Button("Reset train tracking now"))
@@ -347,7 +259,77 @@ public sealed class Plugin : IDalamudPlugin
             _config.Flags.Clear();
             _config.Save();
         }
-        ImGui.TextDisabled("Clears tracking and the flag list without posting anything — use if you need to abandon a train.");
+        ImGui.TextDisabled("Clears tracking and S-rank watches without posting anything — use if you need to abandon a train.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.TextWrapped("S-Rank Watches");
+
+        foreach (var name in SimpleSRanks)
+        {
+            if (ImGui.Button($"Watch {name}"))
+            {
+                _config.Flags.Add(new FlagEntry { Label = name });
+                _config.Save();
+            }
+            ImGui.SameLine();
+        }
+
+        var spawnLabels = NarrowRiftSpawns.Select((s, i) => $"Spawn {i + 1} ({s.X:F1}, {s.Y:F1})").ToArray();
+        ImGui.SetNextItemWidth(180);
+        ImGui.Combo("##narrowRiftSpawn", ref _selectedNarrowRiftSpawn, spawnLabels, spawnLabels.Length);
+        ImGui.SameLine();
+        if (ImGui.Button("Watch Narrow-rift"))
+        {
+            var spot = NarrowRiftSpawns[_selectedNarrowRiftSpawn];
+            _config.Flags.Add(new FlagEntry
+            {
+                Label = $"Narrow-rift — Spawn {_selectedNarrowRiftSpawn + 1} ({spot.X:F1}, {spot.Y:F1})",
+            });
+            _config.Save();
+        }
+
+        ImGui.Spacing();
+
+        int? toRemove = null;
+        for (var i = 0; i < _config.Flags.Count; i++)
+        {
+            var flag = _config.Flags[i];
+            ImGui.PushID(i);
+
+            ImGui.TextWrapped(flag.Label);
+
+            var spawned = flag.SpawnStatus == SpawnStatus.Spawned;
+            var notSpawned = flag.SpawnStatus == SpawnStatus.NotSpawned;
+
+            if (ImGui.Checkbox("Spawned", ref spawned))
+            {
+                flag.SpawnStatus = spawned ? SpawnStatus.Spawned : SpawnStatus.Unknown;
+                _config.Save();
+            }
+            ImGui.SameLine();
+            if (ImGui.Checkbox("Didn't Spawn", ref notSpawned))
+            {
+                flag.SpawnStatus = notSpawned ? SpawnStatus.NotSpawned : SpawnStatus.Unknown;
+                _config.Save();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Remove"))
+            {
+                toRemove = i;
+            }
+
+            ImGui.Separator();
+            ImGui.PopID();
+        }
+
+        if (toRemove.HasValue)
+        {
+            _config.Flags.RemoveAt(toRemove.Value);
+            _config.Save();
+        }
     }
 
     private void DrawScoutTab()
@@ -375,279 +357,6 @@ public sealed class Plugin : IDalamudPlugin
             "+ Add scout",
             $"Maximum of {MaxAdditionalScouts} additional scouts reached.");
         ImGui.PopID();
-    }
-
-    private void DrawFlagsTab()
-    {
-        ImGui.Spacing();
-        ImGui.TextWrapped("S-rank watches and Rally Flags for this train. Clears when the train ends (Reset or a successful End Train Now).");
-        ImGui.Spacing();
-
-        if (ImGui.Button("Open Flag List Popup"))
-        {
-            _flagPopoutVisible = true;
-        }
-        ImGui.TextDisabled("A small separate window you can keep on-screen while conducting.");
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // --- Add S-rank (fixed quick list, per group feedback) ---
-        ImGui.TextWrapped("Add an S-rank to watch for:");
-        foreach (var (sName, sExpansion) in QuickSRanks)
-        {
-            if (ImGui.Button($"Add {sName}"))
-            {
-                _config.Flags.Add(new FlagEntry { Label = sName, IsSRank = true });
-                _config.Save();
-            }
-            ImGui.SameLine();
-        }
-        ImGui.NewLine();
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // --- Add Rally Flag ---
-        ImGui.TextWrapped("Add a Rally Flag:");
-
-        if (_config.SavedLocations.Count > 0)
-        {
-            var savedNames = _config.SavedLocations.Select(s => s.Name).ToArray();
-            ImGui.SetNextItemWidth(220);
-            ImGui.Combo("##savedLocation", ref _selectedSavedLocationIndex, savedNames, savedNames.Length);
-            ImGui.SameLine();
-            if (ImGui.Button("Add from Library"))
-            {
-                var loc = _config.SavedLocations[_selectedSavedLocationIndex];
-                _config.Flags.Add(new FlagEntry
-                {
-                    Label = loc.Name,
-                    IsSRank = false,
-                    HasLocation = true,
-                    TerritoryId = loc.TerritoryId,
-                    MapId = loc.MapId,
-                    Instance = loc.Instance,
-                    X = loc.X,
-                    Y = loc.Y,
-                });
-                _config.Save();
-            }
-        }
-
-        ImGui.Spacing();
-        if (ImGui.Button("Add Blank Rally Flag"))
-        {
-            _config.Flags.Add(new FlagEntry { Label = "New Rally Flag", IsSRank = false });
-            _config.Save();
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Add From Current Flag"))
-        {
-            if (FlagCapture.TryGetCurrentFlag(out var t, out var m, out var cx, out var cy))
-            {
-                _config.Flags.Add(new FlagEntry
-                {
-                    Label = "New Rally Flag",
-                    IsSRank = false,
-                    HasLocation = true,
-                    TerritoryId = t,
-                    MapId = m,
-                    X = cx,
-                    Y = cy,
-                });
-                _config.Save();
-            }
-            else
-            {
-                _lastPostResult = "No flag currently set — place one with Ctrl+Right-Click first.";
-            }
-        }
-        ImGui.TextDisabled(
-            "Set your own in-game flag with Ctrl+Right-Click first, then Add From Current Flag reads " +
-            "it in directly. New locations can be saved to the Library (Settings tab) for reuse."
-        );
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        int? toRemove = null;
-        for (var i = 0; i < _config.Flags.Count; i++)
-        {
-            ImGui.PushID(i);
-            DrawFlagEntry(_config.Flags[i], () => toRemove = i);
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            ImGui.PopID();
-        }
-
-        if (toRemove.HasValue)
-        {
-            _config.Flags.RemoveAt(toRemove.Value);
-            _config.Save();
-        }
-    }
-
-    private void DrawFlagEntry(FlagEntry flag, Action onRemove)
-    {
-        if (flag.IsSRank)
-        {
-            ImGui.TextWrapped($"[S-Rank] {flag.Label}");
-
-            var spawned = flag.SpawnStatus == SpawnStatus.Spawned;
-            var notSpawned = flag.SpawnStatus == SpawnStatus.NotSpawned;
-
-            if (ImGui.Checkbox("Spawned", ref spawned))
-            {
-                flag.SpawnStatus = spawned ? SpawnStatus.Spawned : SpawnStatus.Unknown;
-                _config.Save();
-            }
-            ImGui.SameLine();
-            if (ImGui.Checkbox("Didn't Spawn", ref notSpawned))
-            {
-                flag.SpawnStatus = notSpawned ? SpawnStatus.NotSpawned : SpawnStatus.Unknown;
-                _config.Save();
-            }
-        }
-        else
-        {
-            var label = flag.Label;
-            ImGui.SetNextItemWidth(300);
-            if (ImGui.InputText("Label", ref label, 256))
-            {
-                flag.Label = label;
-            }
-            if (ImGui.IsItemDeactivatedAfterEdit()) _config.Save();
-        }
-
-        ImGui.TextWrapped(MapLinkHelper.CoordinateSummary(flag));
-
-        if (_config.SavedLocations.Count > 0)
-        {
-            var savedNames = _config.SavedLocations.Select(s => s.Name).ToArray();
-            var applyIndex = Math.Clamp(_selectedSavedLocationIndex, 0, savedNames.Length - 1);
-            ImGui.SetNextItemWidth(220);
-            ImGui.Combo("##applySaved", ref applyIndex, savedNames, savedNames.Length);
-            _selectedSavedLocationIndex = applyIndex;
-            ImGui.SameLine();
-            if (ImGui.Button("Use This Location"))
-            {
-                var loc = _config.SavedLocations[applyIndex];
-                flag.TerritoryId = loc.TerritoryId;
-                flag.MapId = loc.MapId;
-                flag.Instance = loc.Instance;
-                flag.X = loc.X;
-                flag.Y = loc.Y;
-                flag.HasLocation = true;
-                _config.Save();
-            }
-        }
-
-        if (ImGui.Button("Capture From Current Flag"))
-        {
-            if (FlagCapture.TryGetCurrentFlag(out var t, out var m, out var cx, out var cy))
-            {
-                flag.TerritoryId = t;
-                flag.MapId = m;
-                flag.X = cx;
-                flag.Y = cy;
-                flag.HasLocation = true;
-                _config.Save();
-            }
-            else
-            {
-                _lastPostResult = "No flag currently set — place one with Ctrl+Right-Click first.";
-            }
-        }
-        ImGui.TextDisabled("Or type it in manually below:");
-
-        var territory = (int)flag.TerritoryId;
-        ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("Territory ID", ref territory))
-        {
-            flag.TerritoryId = (uint)Math.Max(0, territory);
-            flag.HasLocation = flag.TerritoryId > 0 && flag.MapId > 0;
-            _config.Save();
-        }
-
-        var map = (int)flag.MapId;
-        ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("Map ID", ref map))
-        {
-            flag.MapId = (uint)Math.Max(0, map);
-            flag.HasLocation = flag.TerritoryId > 0 && flag.MapId > 0;
-            _config.Save();
-        }
-
-        var instance = flag.Instance;
-        ImGui.SetNextItemWidth(80);
-        if (ImGui.InputInt("Instance (0 = none)", ref instance))
-        {
-            flag.Instance = Math.Clamp(instance, 0, 9);
-            _config.Save();
-        }
-
-        var x = flag.X;
-        ImGui.SetNextItemWidth(100);
-        if (ImGui.InputFloat("X", ref x, 0.1f))
-        {
-            flag.X = x;
-            _config.Save();
-        }
-
-        ImGui.SameLine();
-        var y = flag.Y;
-        ImGui.SetNextItemWidth(100);
-        if (ImGui.InputFloat("Y", ref y, 0.1f))
-        {
-            flag.Y = y;
-            _config.Save();
-        }
-
-        ImGui.Spacing();
-
-        if (flag.HasLocation)
-        {
-            if (ImGui.Button("Ping My Map"))
-            {
-                if (!MapLinkHelper.OpenMap(_gameGui, flag))
-                    _lastPostResult = "Could not open the map with that location — double-check Territory ID / Map ID.";
-            }
-            ImGui.SameLine();
-        }
-
-        if (ImGui.Button("Copy Message"))
-        {
-            ImGui.SetClipboardText(FlagMessageHelper.BuildChatMessage(flag));
-        }
-        ImGui.SameLine();
-
-        if (flag.HasLocation)
-        {
-            if (ImGui.Button("Save to Library"))
-            {
-                _config.SavedLocations.Add(new SavedLocation
-                {
-                    Name = flag.Label,
-                    TerritoryId = flag.TerritoryId,
-                    MapId = flag.MapId,
-                    Instance = flag.Instance,
-                    X = flag.X,
-                    Y = flag.Y,
-                });
-                _config.Save();
-            }
-            ImGui.SameLine();
-        }
-
-        if (ImGui.Button("Remove"))
-        {
-            onRemove();
-        }
     }
 
     private void DrawMarksSlainTab()
@@ -740,106 +449,6 @@ public sealed class Plugin : IDalamudPlugin
             _config.PollIntervalSeconds = Math.Clamp(pollInterval, 1, 30);
             _config.Save();
         }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.TextWrapped(
-            "Saved Locations — reusable rally points. Set one up once with real coordinates, and " +
-            "it's a one-click add on the Flags tab for every future train."
-        );
-        ImGui.Spacing();
-
-        DrawSavedLocationsList();
-    }
-
-    private void DrawSavedLocationsList()
-    {
-        int? toRemove = null;
-
-        for (var i = 0; i < _config.SavedLocations.Count; i++)
-        {
-            ImGui.PushID(i);
-            var loc = _config.SavedLocations[i];
-            var instancePart = loc.Instance > 0 ? $", Instance {loc.Instance}" : "";
-            ImGui.TextWrapped($"{loc.Name} — Territory {loc.TerritoryId}, Map {loc.MapId}{instancePart} — ({loc.X:F1}, {loc.Y:F1})");
-            if (ImGui.Button("Remove"))
-            {
-                toRemove = i;
-            }
-            ImGui.Separator();
-            ImGui.PopID();
-        }
-
-        if (toRemove.HasValue)
-        {
-            _config.SavedLocations.RemoveAt(toRemove.Value);
-            _config.Save();
-        }
-
-        ImGui.Spacing();
-        ImGui.TextWrapped("Add a new saved location:");
-
-        if (ImGui.Button("Fill In From Current Flag"))
-        {
-            if (FlagCapture.TryGetCurrentFlag(out var t, out var m, out var cx, out var cy))
-            {
-                _newLocationTerritory = (int)t;
-                _newLocationMap = (int)m;
-                _newLocationX = cx;
-                _newLocationY = cy;
-            }
-            else
-            {
-                _lastPostResult = "No flag currently set — place one with Ctrl+Right-Click first.";
-            }
-        }
-        ImGui.TextDisabled("Set your own in-game flag first (Ctrl+Right-Click), then use this to read it in.");
-
-        ImGui.SetNextItemWidth(200);
-        ImGui.InputText("Name", ref _newLocationName, 128);
-
-        ImGui.SetNextItemWidth(120);
-        ImGui.InputInt("Territory ID##new", ref _newLocationTerritory);
-
-        ImGui.SetNextItemWidth(120);
-        ImGui.InputInt("Map ID##new", ref _newLocationMap);
-
-        ImGui.SetNextItemWidth(80);
-        ImGui.InputInt("Instance (0 = none)##new", ref _newLocationInstance);
-
-        ImGui.SetNextItemWidth(100);
-        ImGui.InputFloat("X##new", ref _newLocationX, 0.1f);
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(100);
-        ImGui.InputFloat("Y##new", ref _newLocationY, 0.1f);
-
-        if (ImGui.Button("+ Add Saved Location"))
-        {
-            if (string.IsNullOrWhiteSpace(_newLocationName) || _newLocationTerritory <= 0 || _newLocationMap <= 0)
-            {
-                _lastPostResult = "Enter a name, Territory ID, and Map ID before adding a saved location.";
-            }
-            else
-            {
-                _config.SavedLocations.Add(new SavedLocation
-                {
-                    Name = _newLocationName,
-                    TerritoryId = (uint)_newLocationTerritory,
-                    MapId = (uint)_newLocationMap,
-                    Instance = Math.Clamp(_newLocationInstance, 0, 9),
-                    X = _newLocationX,
-                    Y = _newLocationY,
-                });
-                _config.Save();
-                _newLocationName = string.Empty;
-                _newLocationTerritory = 0;
-                _newLocationMap = 0;
-                _newLocationInstance = 0;
-                _newLocationX = 0;
-                _newLocationY = 0;
-            }
-        }
     }
 
     private void DrawWebhookList()
@@ -911,8 +520,7 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>
     /// Reusable add/remove list editor for simple string lists (currently just
-    /// additional scouts). Caller must wrap the call in ImGui.PushID with a
-    /// unique key if more than one such list is ever drawn in the same window.
+    /// additional scouts).
     /// </summary>
     private void DrawStringList(List<string> list, int maxCount, string addLabel, string maxReachedLabel)
     {

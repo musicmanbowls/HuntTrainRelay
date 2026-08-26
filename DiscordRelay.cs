@@ -103,19 +103,16 @@ public static class DiscordRelay
     }
 
     /// <summary>
-    /// S-rank watch results for the train (Spawned / Didn't Spawn / never
-    /// checked) — Rally Flags are deliberately left out of the Discord report,
-    /// since they're a live in-game coordination tool, not something that needs
-    /// to live on in a historical record.
+    /// S-rank watch results for the train (Spawned / Didn't Spawn / never checked).
     /// </summary>
     private static string BuildFlagFooter(List<FlagEntry>? flags)
     {
-        var sRanks = (flags ?? new List<FlagEntry>()).Where(f => f.IsSRank).ToList();
-        if (sRanks.Count == 0) return string.Empty;
+        var watches = flags ?? new List<FlagEntry>();
+        if (watches.Count == 0) return string.Empty;
 
         var sb = new StringBuilder();
         sb.Append("\n**S-Rank Checks**\n");
-        foreach (var f in sRanks)
+        foreach (var f in watches)
         {
             var status = f.SpawnStatus switch
             {
