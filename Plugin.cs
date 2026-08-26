@@ -22,7 +22,6 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ICommandManager _commandManager;
     private readonly IChatGui _chatGui;
     private readonly IObjectTable _objectTable;
-    private readonly IGameGui _gameGui;
     private readonly IPluginLog _log;
 
     private readonly Configuration _config;
@@ -30,6 +29,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly TrainWatcher _watcher;
 
     private bool _configWindowVisible;
+    private bool _flagPopoutVisible;
     private string _lastPostResult = string.Empty;
     private int _selectedSRankIndex;
 
@@ -42,14 +42,12 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IChatGui chatGui,
         IObjectTable objectTable,
-        IGameGui gameGui,
         IPluginLog pluginLog)
     {
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
         _chatGui = chatGui;
         _objectTable = objectTable;
-        _gameGui = gameGui;
         _log = pluginLog;
 
         _config = _pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
@@ -176,6 +174,12 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawUI()
     {
+        DrawMainWindow();
+        DrawFlagPopout();
+    }
+
+    private void DrawMainWindow()
+    {
         if (!_configWindowVisible) return;
 
         ImGui.SetNextWindowSize(new Vector2(480, 480), ImGuiCond.FirstUseEver);
@@ -221,6 +225,61 @@ public sealed class Plugin : IDalamudPlugin
                 ImGui.Spacing();
                 ImGui.Separator();
                 ImGui.TextWrapped($"Last post: {_lastPostResult}");
+            }
+        }
+        ImGui.End();
+    }
+
+    /// <summary>
+    /// A small, separate always-available window listing the current flags —
+    /// meant to sit on the side of the screen while conducting, independent of
+    /// whether the main settings window is even open. Only quick actions here
+    /// (spawn status, copy message); adding/removing flags stays on the Flags
+    /// tab in the main window.
+    /// </summary>
+    private void DrawFlagPopout()
+    {
+        if (!_flagPopoutVisible) return;
+
+        ImGui.SetNextWindowSize(new Vector2(280, 220), ImGuiCond.FirstUseEver);
+        if (ImGui.Begin("Hunt Train Flags", ref _flagPopoutVisible))
+        {
+            if (_config.Flags.Count == 0)
+            {
+                ImGui.TextDisabled("No flags yet — add some on the Flags tab in the main window.");
+            }
+
+            foreach (var flag in _config.Flags)
+            {
+                ImGui.PushID(flag.GetHashCode());
+                ImGui.TextWrapped(flag.IsSRank ? $"[S] {flag.Label}" : flag.Label);
+
+                if (flag.IsSRank)
+                {
+                    var spawned = flag.SpawnStatus == SpawnStatus.Spawned;
+                    var notSpawned = flag.SpawnStatus == SpawnStatus.NotSpawned;
+
+                    if (ImGui.Checkbox("Up", ref spawned))
+                    {
+                        flag.SpawnStatus = spawned ? SpawnStatus.Spawned : SpawnStatus.Unknown;
+                        _config.Save();
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Checkbox("Not up", ref notSpawned))
+                    {
+                        flag.SpawnStatus = notSpawned ? SpawnStatus.NotSpawned : SpawnStatus.Unknown;
+                        _config.Save();
+                    }
+                    ImGui.SameLine();
+                }
+
+                if (ImGui.Button("Copy"))
+                {
+                    ImGui.SetClipboardText(FlagMessageHelper.BuildChatMessage(flag));
+                }
+
+                ImGui.Separator();
+                ImGui.PopID();
             }
         }
         ImGui.End();
@@ -293,6 +352,14 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Spacing();
         ImGui.TextWrapped("S-rank watches and Rally Flags for this train. Clears when the train ends (Reset or a successful End Train Now).");
         ImGui.Spacing();
+
+        if (ImGui.Button("Open Flag List Popup"))
+        {
+            _flagPopoutVisible = true;
+        }
+        ImGui.TextDisabled("A small separate window you can keep on-screen while conducting.");
+
+        ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -318,7 +385,11 @@ public sealed class Plugin : IDalamudPlugin
             _config.Flags.Add(new FlagEntry { Label = "New Rally Flag", IsSRank = false });
             _config.Save();
         }
-        ImGui.TextDisabled("For a location planned ahead of time (e.g. an aetheryte to meet at before switching instance).");
+        ImGui.TextDisabled(
+            "For a location planned ahead of time (e.g. an aetheryte to meet at). Set your own " +
+            "in-game flag with Ctrl+Right-Click when you're actually there, then use Copy Message " +
+            "to send it — the <flag> placeholder fills in automatically when you send the message."
+        );
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -375,68 +446,11 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ImGui.Spacing();
-        ImGui.TextDisabled("Location — read these off the game's own map after placing a flag there (Ctrl+Right-Click).");
-
-        var territory = (int)flag.TerritoryId;
-        ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("Territory ID", ref territory))
+        if (ImGui.Button("Copy Message"))
         {
-            flag.TerritoryId = (uint)Math.Max(0, territory);
-            _config.Save();
+            ImGui.SetClipboardText(FlagMessageHelper.BuildChatMessage(flag));
         }
-
-        var map = (int)flag.MapId;
-        ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("Map ID", ref map))
-        {
-            flag.MapId = (uint)Math.Max(0, map);
-            _config.Save();
-        }
-
-        var instance = flag.Instance;
-        ImGui.SetNextItemWidth(80);
-        if (ImGui.InputInt("Instance (0 = none)", ref instance))
-        {
-            flag.Instance = Math.Clamp(instance, 0, 9);
-            _config.Save();
-        }
-
-        var x = flag.X;
-        ImGui.SetNextItemWidth(100);
-        if (ImGui.InputFloat("X", ref x, 0.1f))
-        {
-            flag.X = x;
-            _config.Save();
-        }
-
         ImGui.SameLine();
-        var y = flag.Y;
-        ImGui.SetNextItemWidth(100);
-        if (ImGui.InputFloat("Y", ref y, 0.1f))
-        {
-            flag.Y = y;
-            _config.Save();
-        }
-
-        flag.HasLocation = flag.TerritoryId > 0 && flag.MapId > 0;
-
-        ImGui.Spacing();
-
-        if (flag.HasLocation)
-        {
-            if (ImGui.Button("Ping My Map"))
-            {
-                if (!MapLinkHelper.OpenMap(_gameGui, flag))
-                    _lastPostResult = "Could not open the map with that location — double-check Territory ID / Map ID.";
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Copy Coordinates"))
-            {
-                ImGui.SetClipboardText(MapLinkHelper.CoordinateText(flag));
-            }
-            ImGui.SameLine();
-        }
-
         if (ImGui.Button("Remove"))
         {
             onRemove();

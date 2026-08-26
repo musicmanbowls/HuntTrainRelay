@@ -21,13 +21,6 @@ public class FlagEntry
     public string Label { get; set; } = string.Empty;
     public bool IsSRank { get; set; } = false;
     public SpawnStatus SpawnStatus { get; set; } = SpawnStatus.Unknown;
-
-    public bool HasLocation { get; set; } = false;
-    public uint TerritoryId { get; set; } = 0;
-    public uint MapId { get; set; } = 0;
-    public int Instance { get; set; } = 0;
-    public float X { get; set; } = 0;
-    public float Y { get; set; } = 0;
 }
 
 [Serializable]

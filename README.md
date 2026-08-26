@@ -66,12 +66,15 @@ Treat the webhook URL like a password — anyone who has it can post to that cha
 - *Add Rally Flag*: a location planned ahead of time — e.g. an aetheryte to
   meet at before everyone switches instance. Doesn't appear on the Discord
   report; it's a live, in-the-moment coordination tool, not a historical record.
-- *Location*: type in Territory ID, Map ID, optional instance, and X/Y —
-  read these off the game's own map after placing a flag there yourself
-  (Ctrl+Right-Click). Once a location's filled in, **Ping My Map** opens your
-  own map with the flag placed, and **Copy Coordinates** puts plain text on
-  your clipboard to paste into Say/Shout. (A real clickable link in chat isn't
-  supported yet — that needs a mechanism I haven't verified works safely.)
+- *Copy Message*: puts something like `Heritage Found Instance 1 — <flag>` on
+  your clipboard. `<flag>` is FFXIV's own built-in placeholder — set your
+  actual in-game flag with Ctrl+Right-Click when you're at (or ready to
+  reference) the spot, then paste and send in Say/Shout; the game fills in
+  your current flag automatically. No coordinates involved on our end at all.
+- *Open Flag List Popup*: a small separate window, independent of the main
+  settings window, meant to sit on the side of your screen while conducting.
+  Shows the same list with just the quick actions (spawn status, Copy
+  Message) — adding or removing flags still happens on this tab.
 - The whole list clears when the train ends, same as tracking.
 
 **Marks Slain**
@@ -98,9 +101,6 @@ Treat the webhook URL like a password — anyone who has it can post to that cha
 - "Assumed Sniped" (on End Train Now) and "Not yet scouted" (on Scouting
   Report) both check whether a named mark was seen at all, not whether every
   concurrent instance of its zone was checked.
-- Flag locations are entered manually (Territory ID / Map ID / X / Y read off
-  the in-game map) rather than auto-captured — there's no verified way to read
-  a currently-placed flag back out of the game safely.
 
 ## For whoever maintains this (build from source)
 
