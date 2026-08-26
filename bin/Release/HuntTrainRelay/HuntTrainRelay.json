@@ -2,8 +2,8 @@
   "Author": "MusicManBowls",
   "Name": "Hunt Train Relay",
   "InternalName": "HuntTrainRelay",
-  "AssemblyVersion": "1.0.0.0",
-  "Description": "Watches Hunt Helper's recorded A-Rank train via its IPC. When every currently tracked mark is marked dead, posts a Discord embed listing each mark and its estimated respawn window, using Discord's native per-viewer local-time timestamps.",
+  "AssemblyVersion": "1.1.0.0",
+  "Description": "Watches Hunt Helper's train via its IPC. Ends manually via End Train Now, posting a Discord report sorted by the order marks actually died, with Assumed Sniped detection for named marks never seen. Also supports on-demand scouting reports with multi-scout credit.",
   "ApplicableVersion": "any",
   "RepoUrl": "https://github.com/MusicManBowls/HuntTrainRelay",
   "Tags": [

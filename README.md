@@ -1,9 +1,10 @@
 # Hunt Train Relay
 
-Connects Hunt Helper to Discord. When a hunt train's marks are all dead, it posts
-a message listing each one and its estimated respawn window — shown in each
-Discord reader's own local time. It can also post a scouting report on demand,
-including a code that pastes straight into anyone else's Hunt Helper.
+Connects Hunt Helper to Discord. Records the exact moment each mark dies in the
+background, then — when you click **End Train Now** — posts a report sorted by
+the order things actually died, with each mark's estimated respawn window shown
+in every Discord reader's own local time. It can also post a scouting report on
+demand, including a code that pastes straight into anyone else's Hunt Helper.
 
 ## Install
 
@@ -24,24 +25,31 @@ Updates show up as a normal **Update** button in `/xlplugins` — no reinstallin
 2. Type `/htr` in-game to open the settings window.
 3. Go to the **Settings** tab, paste the webhook URL in, and click **Send test
    message** to confirm it posted.
-4. Whoever is actively conducting a train ticks **I'm conducting** on the
+4. Whoever is actively conducting a train ticks **Tracking this train** on the
    **Conductor** tab — everyone else leaves it off.
+5. When the train is genuinely finished, click **End Train Now**. Nothing posts
+   on its own — this is the only thing that sends a report.
 
 Treat the webhook URL like a password — anyone who has it can post to that channel.
 
 ## What each tab does
 
 **Conductor**
-- *I'm conducting — auto-post when the train is cleared*: turns on live
-  tracking. When every mark Hunt Helper currently has recorded is dead, it
-  posts automatically. Only the person actually running Hunt Helper's train
-  recorder should have this on, to avoid duplicate posts.
+- *Tracking this train (records exact kill times)*: turns on background
+  tracking. While it's on, the plugin watches Hunt Helper and remembers the
+  exact moment each mark flips to dead — it doesn't post anything by itself.
+  Only the person actually running Hunt Helper's train recorder should have
+  this on.
 - *Status*: a live line showing what tracking currently sees (how many marks,
   how many dead, waiting for Hunt Helper, etc.).
-- *Reset train tracking now*: clears tracking so the next mark Hunt Helper
-  reports is treated as a fresh train. Doesn't post anything.
-- *End Train Now*: a manual fallback — posts whatever Hunt Helper's train list
-  currently shows right away, in case auto-post didn't fire for some reason.
+- *End Train Now*: the only way a report gets sent. Posts every mark tracked
+  this train — including ones cleared away mid-train with Hunt Helper's own
+  "Remove Dead" — sorted by the order they actually died, then clears tracking
+  for the next train. Deliberately manual: for multi-expansion trains (e.g.
+  Dawntrail → Shadowbringers → Endwalker), auto-firing the moment "everything
+  currently tracked is dead" would fire after the *first* leg, not the real end.
+- *Reset train tracking now*: clears tracking without posting anything — use
+  if you need to abandon a train partway through.
 
 **Scout**
 - *Send Scouting Report*: posts a paste-able Hunt Helper import code, plus how
@@ -53,8 +61,9 @@ Treat the webhook URL like a password — anyone who has it can post to that cha
   work.
 - *Webhook URLs*: one row per Discord server to post reports to. Add up to 5
   with the **+ Add webhook** button.
-- *Check interval (seconds)*: how often (while "I'm conducting" is on) it
-  checks Hunt Helper for changes. 3 seconds is fine for most people.
+- *Check interval (seconds)*: how often (while "Tracking this train" is on) it
+  checks Hunt Helper for changes — this is what determines how precisely a
+  kill time is recorded. 3 seconds is fine for most people.
 
 ## Known limitations (by design)
 
@@ -63,8 +72,9 @@ Treat the webhook URL like a password — anyone who has it can post to that cha
 - Respawn windows are calculated from when *your own client* saw a mark flip
   to dead, not an exact server-side kill timestamp — accurate to within the
   check interval.
-- "Not yet scouted" checks whether a named mark was seen at all, not whether
-  every concurrent instance of its zone was checked.
+- "Assumed Sniped" (on End Train Now) and "Not yet scouted" (on Scouting
+  Report) both check whether a named mark was seen at all, not whether every
+  concurrent instance of its zone was checked.
 
 ## For whoever maintains this (build from source)
 

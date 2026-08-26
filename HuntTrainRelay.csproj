@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Authors>Your Name</Authors>
+    <Authors>MusicManBowls</Authors>
     <Company></Company>
-    <Version>1.0.0.0</Version>
-    <Description>Watches Hunt Helper's recorded A-Rank train and posts a Discord webhook with per-mark respawn estimates when the train is fully cleared.</Description>
+    <Version>1.1.0.0</Version>
+    <Description>Watches Hunt Helper's train via its IPC and posts a Discord report sorted by kill order when a conductor ends the train, plus on-demand scouting reports.</Description>
     <PackageProjectUrl></PackageProjectUrl>
   </PropertyGroup>
 </Project>

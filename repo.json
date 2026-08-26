@@ -2,17 +2,17 @@
   {
     "Author": "MusicManBowls",
     "Name": "Hunt Train Relay",
-    "Description": "Watches Hunt Helper's recorded A-Rank train via its IPC. When every currently tracked mark is marked dead, posts a Discord embed listing each mark and its estimated respawn window, using Discord's native per-viewer local-time timestamps. Also supports manual scouting reports.",
+    "Description": "Watches Hunt Helper's train via its IPC. Ends manually via End Train Now, posting a Discord report sorted by the order marks actually died, with Assumed Sniped detection for named marks never seen. Also supports on-demand scouting reports with multi-scout credit.",
     "InternalName": "HuntTrainRelay",
-    "AssemblyVersion": "1.0.0.0",
+    "AssemblyVersion": "1.1.0.0",
     "RepoUrl": "https://github.com/MusicManBowls/HuntTrainRelay",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
-    "Punchline": "Posts your hunt train's finish time + per-mark respawn estimates to Discord.",
+    "Punchline": "Posts a Discord report sorted by kill order when you end a train, plus on-demand scouting reports.",
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://github.com/musicmanbowls/HuntTrainRelay/releases/download/1.0.0/HuntTrainRelay.zip",
-    "DownloadLinkTesting": "https://github.com/musicmanbowls/HuntTrainRelay/releases/download/1.0.0/HuntTrainRelay.zip",
-    "DownloadLinkUpdate": "https://github.com/musicmanbowls/HuntTrainRelay/releases/download/1.0.0/HuntTrainRelay.zip"
+    "DownloadLinkInstall": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/1.1/HuntTrainRelay.zip",
+    "DownloadLinkTesting": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/1.1/HuntTrainRelay.zip",
+    "DownloadLinkUpdate": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/1.1/HuntTrainRelay.zip"
   }
 ]

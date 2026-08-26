@@ -75,13 +75,13 @@
     "C:\\Users\\chris\\.nuget\\packages\\": {}
   },
   "project": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\chris\\AppData\\Roaming\\XIVLauncher\\DevPLugin\\HuntTrainRelay\\HuntTrainRelay.csproj",
+      "projectUniqueName": "E:\\GitProjects\\HuntTrainRelay\\HuntTrainRelay.csproj",
       "projectName": "HuntTrainRelay",
-      "projectPath": "C:\\Users\\chris\\AppData\\Roaming\\XIVLauncher\\DevPLugin\\HuntTrainRelay\\HuntTrainRelay.csproj",
+      "projectPath": "E:\\GitProjects\\HuntTrainRelay\\HuntTrainRelay.csproj",
       "packagesPath": "C:\\Users\\chris\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\chris\\AppData\\Roaming\\XIVLauncher\\DevPLugin\\HuntTrainRelay\\obj\\",
+      "outputPath": "E:\\GitProjects\\HuntTrainRelay\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\chris\\AppData\\Roaming\\NuGet\\NuGet.Config"

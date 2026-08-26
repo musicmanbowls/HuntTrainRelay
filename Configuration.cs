@@ -28,15 +28,25 @@ public class Configuration : IPluginConfiguration
     public string? WebhookUrl { get; set; }
 
     /// <summary>
-    /// Only the conductor actively recording the train should have this on,
-    /// to avoid two clients both posting the same "train complete" message.
+    /// Turns on background tracking of kill times for this train. Only the
+    /// conductor actively recording in Hunt Helper needs this on. Reporting
+    /// itself is always manual via "End Train Now" — this setting only affects
+    /// how accurate the recorded kill times are, not whether anything gets posted.
     /// </summary>
-    public bool AutoPostEnabled { get; set; } = false;
+    public bool TrackingEnabled { get; set; } = false;
 
     /// <summary>
     /// How often (in seconds) to check Hunt Helper's train list for changes.
     /// </summary>
     public int PollIntervalSeconds { get; set; } = 3;
+
+    /// <summary>
+    /// Extra names credited alongside the submitting character on a scouting
+    /// report — e.g. a friend who scouted one expansion and sent you their
+    /// Hunt Helper export code privately to fold into the combined report.
+    /// Capped at 3 in the UI.
+    /// </summary>
+    public List<string> AdditionalScouts { get; set; } = new() { string.Empty };
 
     [NonSerialized]
     private IDalamudPluginInterface? _pluginInterface;

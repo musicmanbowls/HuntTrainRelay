@@ -21,6 +21,16 @@ public class TrackedMark
     public DateTime LastSeenUtc;
 }
 
+/// <summary>
+/// Continuously watches Hunt Helper's train list and records the exact moment
+/// each mark flips to dead — a running "ingested kills" log, independent of
+/// Hunt Helper's own list contents. Never posts or fires anything itself;
+/// reporting is entirely manual via Plugin's "End Train Now", which reads this
+/// history. This is deliberate: automatically firing on "everything currently
+/// tracked is dead" doesn't work for multi-expansion trains (DT -> ShB -> EW),
+/// since DT alone looks "fully cleared" the moment the conductor starts
+/// travelling to ShB, well before the real end of the run.
+/// </summary>
 public class TrainWatcher : IDisposable
 {
     private readonly IFramework _framework;
@@ -29,21 +39,18 @@ public class TrainWatcher : IDisposable
 
     private readonly Dictionary<(uint ModelId, uint Instance), TrackedMark> _tracked = new();
     private double _secondsSinceLastPoll;
-    private bool _postedForCurrentSet;
-
-    public event Action<List<TrackedMark>>? TrainCompleted;
 
     public string LastStatus { get; private set; } = "Idle.";
 
     /// <summary>
-    /// Returns the moment this mark was actually observed flipping to dead during
-    /// polling, if the auto-detect loop caught it — null if it was never seen
-    /// transition (e.g. auto-post was off, or it's not currently tracked at all).
-    /// Used by the manual "End Train Now" fallback to avoid relying on Hunt
-    /// Helper's own LastSeenUTC, which doesn't reliably reflect time of death.
+    /// A defensive-copy snapshot of everything currently tracked, keyed the same
+    /// way as internal state — including marks that vanished from Hunt Helper's
+    /// live list while already dead (see the Remove Dead handling in Poll). Used
+    /// by "End Train Now" so it also benefits from this retained history instead
+    /// of only seeing Hunt Helper's current live list.
     /// </summary>
-    public DateTime? GetObservedDeathTime(uint modelId, uint instance) =>
-        _tracked.TryGetValue((modelId, instance), out var tracked) ? tracked.DeathObservedAtUtc : null;
+    public Dictionary<(uint ModelId, uint Instance), TrackedMark> GetTrackedSnapshot() =>
+        new(_tracked);
 
     public TrainWatcher(IFramework framework, HuntHelperIpc ipc, Configuration config)
     {
@@ -60,7 +67,7 @@ public class TrainWatcher : IDisposable
 
     private void OnUpdate(IFramework framework)
     {
-        if (!_config.AutoPostEnabled) return;
+        if (!_config.TrackingEnabled) return;
 
         _secondsSinceLastPoll += framework.UpdateDelta.TotalSeconds;
         var interval = Math.Max(1, _config.PollIntervalSeconds);
@@ -71,19 +78,14 @@ public class TrainWatcher : IDisposable
     }
 
     /// <summary>
-    /// Immediately clears all tracked marks and un-arms posting, so the next mob
-    /// Hunt Helper reports is treated as the start of a fresh train.
+    /// Immediately clears all tracked marks, so the next mob Hunt Helper reports
+    /// is treated as the start of a fresh train. Called manually, or automatically
+    /// right after "End Train Now" posts a report.
     /// </summary>
     public void ResetNow()
     {
-        ResetInternal();
-        LastStatus = "Train tracking reset manually — ready for a new train.";
-    }
-
-    private void ResetInternal()
-    {
         _tracked.Clear();
-        _postedForCurrentSet = false;
+        LastStatus = "Train tracking reset — ready for a new train.";
     }
 
     private void Poll()
@@ -98,13 +100,11 @@ public class TrainWatcher : IDisposable
         if (list.Count == 0)
         {
             _tracked.Clear();
-            _postedForCurrentSet = false;
             LastStatus = "No active train recorded in Hunt Helper.";
             return;
         }
 
         var currentKeys = new HashSet<(uint, uint)>();
-        var isNewSegment = false;
 
         foreach (var mob in list)
         {
@@ -123,7 +123,6 @@ public class TrainWatcher : IDisposable
                     DeathObservedAtUtc = mob.Dead ? mob.LastSeenUTC : null,
                 };
                 _tracked[key] = tracked;
-                isNewSegment = true;
             }
             else
             {
@@ -136,27 +135,18 @@ public class TrainWatcher : IDisposable
             }
         }
 
-        // Drop marks Hunt Helper no longer reports (e.g. removed via its "clear dead" action).
+        // Only drop marks that vanished from Hunt Helper's list while still alive
+        // (unusual - safe to forget). Marks that vanished while already dead are
+        // kept: that's exactly what happens when a conductor uses Hunt Helper's
+        // own "Remove Dead" to tidy up mid-train, and a tidied-up train shouldn't
+        // under-report marks that genuinely died as part of it.
         foreach (var key in _tracked.Keys.Where(k => !currentKeys.Contains(k)).ToList())
-            _tracked.Remove(key);
-
-        // A newly-added mark means a new train segment started; allow posting again.
-        if (isNewSegment)
         {
-            _postedForCurrentSet = false;
+            if (!_tracked[key].Dead)
+                _tracked.Remove(key);
         }
 
         var deadCount = _tracked.Values.Count(m => m.Dead);
-        var allDead = _tracked.Count > 0 && deadCount == _tracked.Count;
-
-        LastStatus = allDead
-            ? $"Train cleared — {_tracked.Count} marks."
-            : $"Tracking {_tracked.Count} marks, {deadCount} dead.";
-
-        if (allDead && !_postedForCurrentSet)
-        {
-            _postedForCurrentSet = true;
-            TrainCompleted?.Invoke(_tracked.Values.ToList());
-        }
+        LastStatus = $"Tracking {_tracked.Count} marks, {deadCount} dead.";
     }
 }

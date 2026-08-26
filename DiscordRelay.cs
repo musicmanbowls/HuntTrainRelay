@@ -15,9 +15,6 @@ public static class DiscordRelay
     // Discord embed side-bar colour (a calm green). Decimal form of hex 2ECC71.
     private const int EmbedColor = 3066993;
 
-    // Discord embed field value hard limit is 1024 characters; stay safely under it.
-    private const int FieldCharLimit = 1000;
-
     public static Task<(bool Success, string Message)> PostTestAsync(List<string> webhookUrls)
     {
         var payload = new
@@ -36,7 +33,7 @@ public static class DiscordRelay
         return SendToAllAsync(webhookUrls, payload);
     }
 
-    public static Task<(bool Success, string Message)> PostScoutingReportAsync(List<string> webhookUrls, List<HuntHelperMobRecord> marks)
+    public static Task<(bool Success, string Message)> PostScoutingReportAsync(List<string> webhookUrls, List<HuntHelperMobRecord> marks, List<string> scoutNames)
     {
         if (marks.Count == 0)
             return Task.FromResult((false, "Nothing to report — Hunt Helper's train list is empty."));
@@ -44,6 +41,9 @@ public static class DiscordRelay
         var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var exportCode = ScoutingReport.BuildExportCode(marks);
         var summary = ScoutingReport.BuildSummary(marks);
+
+        var names = (scoutNames ?? new List<string>()).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
+        var scoutedBy = names.Count > 0 ? $"\n\nScouted by {string.Join(", ", names)}" : "";
 
         string description;
         if (exportCode.Length > 3800)
@@ -54,11 +54,11 @@ public static class DiscordRelay
             description =
                 $"Scouting done at <t:{nowUnix}:F>\n\n{summary}\n\n" +
                 "(Export code omitted — this scout covers too many marks to fit in one " +
-                "Discord message. Try sending separate reports per zone instead.)";
+                $"Discord message. Try sending separate reports per zone instead.){scoutedBy}";
         }
         else
         {
-            description = $"```\n{exportCode}\n```\nScouting done at <t:{nowUnix}:F>\n\n{summary}";
+            description = $"```\n{exportCode}\n```\nScouting done at <t:{nowUnix}:F>\n\n{summary}{scoutedBy}";
         }
 
         var payload = new
@@ -77,125 +77,100 @@ public static class DiscordRelay
         return SendToAllAsync(webhookUrls, payload);
     }
 
-    public static Task<(bool Success, string Message)> PostTrainCompleteAsync(List<string> webhookUrls, List<TrackedMark> marks)
+    public static Task<(bool Success, string Message)> PostTrainCompleteAsync(List<string> webhookUrls, List<TrackedMark> marks, string? endedBy)
     {
         var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var fields = BuildFields(marks);
+        var endedByLine = string.IsNullOrWhiteSpace(endedBy) ? "" : $"\nEnded by {endedBy}";
+        var body = BuildChronologicalBody(marks);
 
-        var payload = new
+        var chunks = ChunkByLength(body, 3800);
+        var embeds = new List<object>();
+        for (var i = 0; i < chunks.Count; i++)
         {
-            embeds = new object[]
+            embeds.Add(new
             {
-                new
-                {
-                    title = "🚂 Train Complete",
-                    description = $"Finished <t:{nowUnix}:F> — {marks.Count} marks",
-                    color = EmbedColor,
-                    fields,
-                },
-            },
-        };
+                title = i == 0 ? "🚂 Train Complete" : "🚂 Train Complete (continued)",
+                description = i == 0
+                    ? $"Finished <t:{nowUnix}:F> — {marks.Count} marks{endedByLine}\n\n{chunks[i]}"
+                    : chunks[i],
+                color = EmbedColor,
+            });
+        }
 
+        var payload = new { embeds };
         return SendToAllAsync(webhookUrls, payload);
     }
 
     /// <summary>
-    /// One or more Discord embed fields per expansion (in ARR -> Dawntrail order),
-    /// each field's value listing marks grouped by home zone (in MSQ order) so
-    /// same-location marks — including duplicate marks across multiple zone
-    /// instances — sit next to each other. Grouped strictly by expansion name —
-    /// never by the whole per-mark record, since each mark's zone differs and
-    /// would otherwise split one expansion into several same-named fields.
+    /// One continuous list sorted by the exact moment each mark was observed
+    /// dead (not by expansion or zone) — reflecting the real order the train
+    /// actually killed things in. A bold expansion header is inserted wherever
+    /// the expansion changes between consecutive kills, purely as a readability
+    /// aid — it's a side effect of the chronological sort, not a grouping key.
+    /// Finishes with an "Assumed Sniped" section. Both the entries and the
+    /// sniped groups come from TrainReport, the same module the in-game
+    /// "Marks Slain" tab reads from.
     /// </summary>
-    private static List<object> BuildFields(List<TrackedMark> marks)
+    private static string BuildChronologicalBody(List<TrackedMark> marks)
     {
-        var withInfo = marks.Select(m => (Mark: m, Info: ExpansionData.Lookup(m.ModelId))).ToList();
+        var entries = TrainReport.BuildEntries(marks);
+        var sb = new StringBuilder();
+        string? lastExpansion = null;
 
-        var groups = withInfo
-            .GroupBy(x => x.Info?.Expansion ?? "No fixed timer")
-            .OrderBy(g => g.Min(x => x.Info?.Order ?? int.MaxValue));
-
-        var fields = new List<object>();
-        foreach (var group in groups)
+        foreach (var entry in entries)
         {
-            var zoneBlocks = BuildZoneBlocks(group.Select(x => x.Mark).ToList());
-            var chunks = ChunkZoneBlocks(zoneBlocks, FieldCharLimit);
-
-            for (var i = 0; i < chunks.Count; i++)
+            if (entry.Expansion != lastExpansion)
             {
-                var name = chunks.Count > 1 ? $"{group.Key} ({i + 1}/{chunks.Count})" : group.Key;
-                fields.Add(new { name, value = chunks[i], inline = false });
+                if (lastExpansion != null) sb.Append('\n');
+                sb.Append($"**{entry.Expansion}**\n");
+                lastExpansion = entry.Expansion;
             }
-        }
 
-        return fields;
-    }
+            var killUnix = new DateTimeOffset(entry.KillTimeUtc).ToUnixTimeSeconds();
 
-    /// <summary>
-    /// One block of text per zone (in MSQ order), each block holding every mark
-    /// from that zone as its own line. Kept as whole blocks so chunking below can
-    /// guarantee a zone's marks are never split across two different fields.
-    /// </summary>
-    private static List<string> BuildZoneBlocks(List<TrackedMark> marksInGroup)
-    {
-        var withInfo = marksInGroup.Select(m => (Mark: m, Info: ExpansionData.Lookup(m.ModelId))).ToList();
-
-        var blocks = withInfo
-            .Where(x => x.Info != null)
-            .GroupBy(x => x.Info!.Location)
-            .OrderBy(g => g.First().Info!.ZoneOrder)
-            .Select(g => string.Join("\n", g.OrderBy(x => x.Mark.Name).Select(x => BuildLine(x.Mark, x.Info!))))
-            .ToList();
-
-        var unknown = withInfo.Where(x => x.Info == null)
-            .Select(x => x.Mark.Name).Distinct().OrderBy(n => n).ToList();
-        if (unknown.Count > 0)
-            blocks.Add($"{string.Join(", ", unknown)} — no fixed respawn timer");
-
-        return blocks;
-    }
-
-    private static string BuildLine(TrackedMark m, MarkInfo mark)
-    {
-        var deathTime = EnsureUtc(m.DeathObservedAtUtc ?? m.LastSeenUtc);
-        var openUnix = new DateTimeOffset(deathTime.AddHours(mark.MinHours)).ToUnixTimeSeconds();
-        var capUnix = new DateTimeOffset(deathTime.AddHours(mark.MaxHours)).ToUnixTimeSeconds();
-        var instanceGlyph = ExpansionData.InstanceGlyph(m.Instance);
-        return $"{mark.Location} — {m.Name}{instanceGlyph} — window <t:{openUnix}:t> → <t:{capUnix}:t>";
-    }
-
-    /// <summary>
-    /// Packs whole zone-blocks into chunks under the character limit — a zone's
-    /// marks are never split across two fields, even if that means starting a new
-    /// field earlier than the character count strictly requires (e.g. a 6-zone
-    /// expansion that needs 2 fields will end up as "first 5 zones" + "last zone"
-    /// rather than cutting a zone's own marks in half). Only in the unlikely case
-    /// one zone alone exceeds the whole limit does it get split by line as a
-    /// last resort.
-    /// </summary>
-    private static List<string> ChunkZoneBlocks(List<string> blocks, int limit)
-    {
-        var chunks = new List<string>();
-        var current = new StringBuilder();
-
-        foreach (var block in blocks)
-        {
-            if (block.Length > limit)
+            if (entry.Location == null || entry.MinHours == null || entry.MaxHours == null)
             {
-                if (current.Length > 0) { chunks.Add(current.ToString()); current.Clear(); }
-                foreach (var line in block.Split('\n'))
-                    chunks.Add(line);
+                sb.Append($"<t:{killUnix}:t> — {entry.Name} — no fixed respawn timer\n");
                 continue;
             }
 
-            if (current.Length > 0 && current.Length + block.Length + 1 > limit)
+            var openUnix = new DateTimeOffset(entry.KillTimeUtc.AddHours(entry.MinHours.Value)).ToUnixTimeSeconds();
+            var capUnix = new DateTimeOffset(entry.KillTimeUtc.AddHours(entry.MaxHours.Value)).ToUnixTimeSeconds();
+            var instanceGlyph = ExpansionData.InstanceGlyph(entry.Instance);
+            sb.Append($"<t:{killUnix}:t> — {entry.Location} — {entry.Name}{instanceGlyph} — window <t:{openUnix}:t> → <t:{capUnix}:t>\n");
+        }
+
+        var sniped = TrainReport.BuildSniped(marks);
+        if (sniped.Count > 0)
+        {
+            sb.Append("\n**Assumed Sniped** (not seen this train)\n");
+            sb.Append(string.Join("\n", sniped.Select(s => $"**{s.Expansion}**: {string.Join(", ", s.Marks)}")));
+            sb.Append('\n');
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Splits text into chunks under the character limit, breaking only at line
+    /// boundaries. Used as a safety net for very large trains where the full
+    /// chronological list would exceed a single embed description's 4096-char
+    /// cap — extra chunks become additional embeds in the same message.
+    /// </summary>
+    private static List<string> ChunkByLength(string body, int limit)
+    {
+        var lines = body.Split('\n');
+        var chunks = new List<string>();
+        var current = new StringBuilder();
+
+        foreach (var line in lines)
+        {
+            if (current.Length > 0 && current.Length + line.Length + 1 > limit)
             {
                 chunks.Add(current.ToString());
                 current.Clear();
             }
-
-            if (current.Length > 0) current.Append('\n');
-            current.Append(block);
+            current.Append(line).Append('\n');
         }
 
         if (current.Length > 0) chunks.Add(current.ToString());
@@ -203,14 +178,6 @@ public static class DiscordRelay
 
         return chunks;
     }
-
-    /// <summary>
-    /// DateTimeOffset treats DateTimeKind.Unspecified as local time, not UTC.
-    /// Hunt Helper's timestamps are always UTC by convention (DateTime.UtcNow),
-    /// but deserializing over IPC can lose the Kind flag, so force it back to UTC.
-    /// </summary>
-    private static DateTime EnsureUtc(DateTime dt) =>
-        dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
 
     /// <summary>
     /// Posts the same payload to every configured, non-empty webhook URL (e.g. one

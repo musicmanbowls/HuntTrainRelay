@@ -10,15 +10,15 @@
 using System;
 using System.Reflection;
 
-[assembly: System.Reflection.AssemblyCompanyAttribute("Your Name")]
+[assembly: System.Reflection.AssemblyCompanyAttribute("MusicManBowls")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
-[assembly: System.Reflection.AssemblyDescriptionAttribute(("Watches Hunt Helper\'s recorded A-Rank train and posts a Discord webhook with per-" +
-    "mark respawn estimates when the train is fully cleared."))]
-[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0.0+4c9fa6a664dd01cb5b7746c0b4be73d0e4c462b5")]
+[assembly: System.Reflection.AssemblyDescriptionAttribute(("Watches Hunt Helper\'s train via its IPC and posts a Discord report sorted by kill" +
+    " order when a conductor ends the train, plus on-demand scouting reports."))]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.1.0.0+d0dd4cdd30cde14e538ba0be68d0a63b23faa2c4")]
 [assembly: System.Reflection.AssemblyProductAttribute("HuntTrainRelay")]
 [assembly: System.Reflection.AssemblyTitleAttribute("HuntTrainRelay")]
-[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.1.0.0")]
 [assembly: System.Reflection.AssemblyMetadataAttribute("RepositoryUrl", "https://github.com/musicmanbowls/HuntTrainRelay.git")]
 [assembly: System.Runtime.Versioning.TargetPlatformAttribute("Windows7.0")]
 [assembly: System.Runtime.Versioning.SupportedOSPlatformAttribute("Windows7.0")]
