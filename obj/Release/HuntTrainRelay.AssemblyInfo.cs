@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyDescriptionAttribute(("Watches Hunt Helper\'s train via its IPC and posts a Discord report sorted by kill" +
     " order when a conductor ends the train, plus on-demand scouting reports."))]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.2.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.2.0.0+fe8be4aeb3efb3adae8b4203b3785e1f5606213b")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.2.0.0+c79a958e9dbba96d3ee73e23a58fe62b2e08e576")]
 [assembly: System.Reflection.AssemblyProductAttribute("HuntTrainRelay")]
 [assembly: System.Reflection.AssemblyTitleAttribute("HuntTrainRelay")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.2.0.0")]

@@ -1,12 +1,3 @@
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\bin\Release\HuntTrainRelay.deps.json
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\bin\Release\HuntTrainRelay.dll
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Release\HuntTrainRelay.csproj.AssemblyReference.cache
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Release\HuntTrainRelay.GeneratedMSBuildEditorConfig.editorconfig
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Release\HuntTrainRelay.AssemblyInfoInputs.cache
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Release\HuntTrainRelay.AssemblyInfo.cs
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Release\HuntTrainRelay.csproj.CoreCompileInputs.cache
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Release\HuntTrainRelay.sourcelink.json
-C:\Users\chris\AppData\Roaming\XIVLauncher\DevPLugin\HuntTrainRelay\obj\Release\HuntTrainRelay.dll
 E:\GitProjects\HuntTrainRelay\bin\Release\HuntTrainRelay.deps.json
 E:\GitProjects\HuntTrainRelay\bin\Release\HuntTrainRelay.dll
 E:\GitProjects\HuntTrainRelay\obj\Release\HuntTrainRelay.csproj.AssemblyReference.cache
