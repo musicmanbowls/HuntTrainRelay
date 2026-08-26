@@ -270,7 +270,7 @@ public sealed class Plugin : IDalamudPlugin
                 ImGui.PushID(flag.GetHashCode());
                 ImGui.TextWrapped(flag.IsSRank ? $"[S] {flag.Label}" : flag.Label);
 
-                if (!flag.IsSRank && flag.HasLocation)
+                if (flag.HasLocation)
                 {
                     ImGui.TextDisabled(MapLinkHelper.CoordinateSummary(flag));
                 }
@@ -293,7 +293,8 @@ public sealed class Plugin : IDalamudPlugin
                     }
                     ImGui.SameLine();
                 }
-                else if (flag.HasLocation)
+
+                if (flag.HasLocation)
                 {
                     if (ImGui.Button("Ping"))
                     {
@@ -442,9 +443,31 @@ public sealed class Plugin : IDalamudPlugin
             _config.Flags.Add(new FlagEntry { Label = "New Rally Flag", IsSRank = false });
             _config.Save();
         }
+        ImGui.SameLine();
+        if (ImGui.Button("Add From Current Flag"))
+        {
+            if (FlagCapture.TryGetCurrentFlag(out var t, out var m, out var cx, out var cy))
+            {
+                _config.Flags.Add(new FlagEntry
+                {
+                    Label = "New Rally Flag",
+                    IsSRank = false,
+                    HasLocation = true,
+                    TerritoryId = t,
+                    MapId = m,
+                    X = cx,
+                    Y = cy,
+                });
+                _config.Save();
+            }
+            else
+            {
+                _lastPostResult = "No flag currently set — place one with Ctrl+Right-Click first.";
+            }
+        }
         ImGui.TextDisabled(
-            "Set your own in-game flag with Ctrl+Right-Click, or use Ping My Map below once a " +
-            "location's filled in. New locations can be saved to the Library (Settings tab) for reuse."
+            "Set your own in-game flag with Ctrl+Right-Click first, then Add From Current Flag reads " +
+            "it in directly. New locations can be saved to the Library (Settings tab) for reuse."
         );
 
         ImGui.Spacing();
@@ -489,24 +512,58 @@ public sealed class Plugin : IDalamudPlugin
                 flag.SpawnStatus = notSpawned ? SpawnStatus.NotSpawned : SpawnStatus.Unknown;
                 _config.Save();
             }
-
-            ImGui.Spacing();
-            if (ImGui.Button("Remove"))
-            {
-                onRemove();
-            }
-            return;
         }
-
-        var label = flag.Label;
-        ImGui.SetNextItemWidth(300);
-        if (ImGui.InputText("Label", ref label, 256))
+        else
         {
-            flag.Label = label;
+            var label = flag.Label;
+            ImGui.SetNextItemWidth(300);
+            if (ImGui.InputText("Label", ref label, 256))
+            {
+                flag.Label = label;
+            }
+            if (ImGui.IsItemDeactivatedAfterEdit()) _config.Save();
         }
-        if (ImGui.IsItemDeactivatedAfterEdit()) _config.Save();
 
         ImGui.TextWrapped(MapLinkHelper.CoordinateSummary(flag));
+
+        if (_config.SavedLocations.Count > 0)
+        {
+            var savedNames = _config.SavedLocations.Select(s => s.Name).ToArray();
+            var applyIndex = Math.Clamp(_selectedSavedLocationIndex, 0, savedNames.Length - 1);
+            ImGui.SetNextItemWidth(220);
+            ImGui.Combo("##applySaved", ref applyIndex, savedNames, savedNames.Length);
+            _selectedSavedLocationIndex = applyIndex;
+            ImGui.SameLine();
+            if (ImGui.Button("Use This Location"))
+            {
+                var loc = _config.SavedLocations[applyIndex];
+                flag.TerritoryId = loc.TerritoryId;
+                flag.MapId = loc.MapId;
+                flag.Instance = loc.Instance;
+                flag.X = loc.X;
+                flag.Y = loc.Y;
+                flag.HasLocation = true;
+                _config.Save();
+            }
+        }
+
+        if (ImGui.Button("Capture From Current Flag"))
+        {
+            if (FlagCapture.TryGetCurrentFlag(out var t, out var m, out var cx, out var cy))
+            {
+                flag.TerritoryId = t;
+                flag.MapId = m;
+                flag.X = cx;
+                flag.Y = cy;
+                flag.HasLocation = true;
+                _config.Save();
+            }
+            else
+            {
+                _lastPostResult = "No flag currently set — place one with Ctrl+Right-Click first.";
+            }
+        }
+        ImGui.TextDisabled("Or type it in manually below:");
 
         var territory = (int)flag.TerritoryId;
         ImGui.SetNextItemWidth(120);
@@ -722,6 +779,22 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.Spacing();
         ImGui.TextWrapped("Add a new saved location:");
+
+        if (ImGui.Button("Fill In From Current Flag"))
+        {
+            if (FlagCapture.TryGetCurrentFlag(out var t, out var m, out var cx, out var cy))
+            {
+                _newLocationTerritory = (int)t;
+                _newLocationMap = (int)m;
+                _newLocationX = cx;
+                _newLocationY = cy;
+            }
+            else
+            {
+                _lastPostResult = "No flag currently set — place one with Ctrl+Right-Click first.";
+            }
+        }
+        ImGui.TextDisabled("Set your own in-game flag first (Ctrl+Right-Click), then use this to read it in.");
 
         ImGui.SetNextItemWidth(200);
         ImGui.InputText("Name", ref _newLocationName, 128);

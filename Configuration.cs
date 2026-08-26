@@ -2,6 +2,7 @@ using Dalamud.Configuration;
 using Dalamud.Plugin;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace HuntTrainRelay;
 
@@ -117,6 +118,33 @@ public class Configuration : IPluginConfiguration
         if (Webhooks == null || Webhooks.Count == 0)
         {
             Webhooks = new List<WebhookEntry> { new WebhookEntry() };
+        }
+
+        // Seed Narrow-rift's known spawn points once (Territory 960 / Map 699,
+        // Ultima Thule — confirmed via arealmremapped.com; coordinates from
+        // ffxiv.consolegameswiki.com/wiki/Narrow-rift's own Coordinates table).
+        // Only adds these if none exist yet, so it never duplicates or disturbs
+        // anything already saved.
+        if (!SavedLocations.Any(l => l.Name.StartsWith("Narrow-rift", StringComparison.OrdinalIgnoreCase)))
+        {
+            var narrowRiftSpawns = new (float X, float Y)[]
+            {
+                (8.3f, 20.2f), (12.0f, 21.9f), (13.3f, 10.4f), (14.7f, 36.1f), (16.5f, 26.2f),
+                (17.6f, 30.3f), (19.2f, 9.8f), (20.7f, 34.0f), (27.9f, 12.6f),
+            };
+            for (var i = 0; i < narrowRiftSpawns.Length; i++)
+            {
+                SavedLocations.Add(new SavedLocation
+                {
+                    Name = $"Narrow-rift Spawn {i + 1}",
+                    TerritoryId = 960,
+                    MapId = 699,
+                    Instance = 0,
+                    X = narrowRiftSpawns[i].X,
+                    Y = narrowRiftSpawns[i].Y,
+                });
+            }
+            Save();
         }
     }
 
