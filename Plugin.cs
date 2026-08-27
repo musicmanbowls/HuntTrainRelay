@@ -15,6 +15,7 @@ public sealed class Plugin : IDalamudPlugin
     public string Name => "Hunt Train Relay";
 
     private const string ConfigCommand = "/htr";
+    private const string TrainCommand = "/htrt";
     private const int MaxWebhooks = 5;
     private const int MaxAdditionalScouts = 3;
 
@@ -37,6 +38,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly IObjectTable _objectTable;
     private readonly IPluginLog _log;
     private readonly SRankZoneReminder _zoneReminder;
+    private readonly MarkDetector _detector;
+    private readonly TeleportHelper _teleport;
+    private readonly IGameGui _gameGui;
 
     private readonly Configuration _config;
     private readonly HuntHelperIpc _ipc;
@@ -44,6 +48,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly TrainWatcher _watcher;
 
     private bool _configWindowVisible;
+    private bool _trainPopoutVisible;
     private string _lastPostResult = string.Empty;
     private int _selectedNarrowRiftSpawn;
 
@@ -54,6 +59,8 @@ public sealed class Plugin : IDalamudPlugin
         IChatGui chatGui,
         IObjectTable objectTable,
         IClientState clientState,
+        IDataManager dataManager,
+        IGameGui gameGui,
         IPluginLog pluginLog)
     {
         _pluginInterface = pluginInterface;
@@ -66,8 +73,11 @@ public sealed class Plugin : IDalamudPlugin
         _config.Initialize(_pluginInterface);
 
         _ipc = new HuntHelperIpc(_pluginInterface);
+        _gameGui = gameGui;
         _huntTally = new HuntTallyIpc(_pluginInterface, _log);
-        _watcher = new TrainWatcher(framework, _ipc, _huntTally, _config);
+        _detector = new MarkDetector(objectTable, clientState, dataManager);
+        _teleport = new TeleportHelper(_pluginInterface, _log);
+        _watcher = new TrainWatcher(framework, _ipc, _huntTally, _detector, _config);
         _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config);
 
         _commandManager.AddHandler(ConfigCommand, new CommandInfo(OnCommand)
@@ -75,11 +85,18 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Open Hunt Train Relay settings.",
         });
 
+        _commandManager.AddHandler(TrainCommand, new CommandInfo(OnTrainCommand)
+        {
+            HelpMessage = "Open the Hunt Train Relay train list popout.",
+        });
+
         _pluginInterface.UiBuilder.Draw += DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi += OnOpenConfigUi;
     }
 
     private void OnCommand(string command, string args) => _configWindowVisible = true;
+
+    private void OnTrainCommand(string command, string args) => _trainPopoutVisible = true;
 
     private void OnOpenConfigUi() => _configWindowVisible = true;
 
@@ -91,6 +108,19 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     private List<TrackedMark>? BuildCurrentMarks()
     {
+        if (_config.UseOwnTrainList)
+        {
+            return _detector.Marks.Values.Select(d => new TrackedMark
+            {
+                Name = d.Name,
+                ModelId = d.NameId,
+                Instance = d.Instance,
+                Dead = d.Dead,
+                LastSeenUtc = d.LastSeenUtc,
+                DeathObservedAtUtc = d.DeathObservedAtUtc,
+            }).ToList();
+        }
+
         var list = _ipc.TryGetTrainList();
         if (list == null) return null;
 
@@ -188,6 +218,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawUI()
     {
+        DrawTrainPopout();
+
         if (!_configWindowVisible) return;
 
         ImGui.SetNextWindowSize(new Vector2(460, 480), ImGuiCond.FirstUseEver);
@@ -198,6 +230,12 @@ public sealed class Plugin : IDalamudPlugin
                 if (ImGui.BeginTabItem("Conductor"))
                 {
                     DrawConductorTab();
+                    ImGui.EndTabItem();
+                }
+
+                if (ImGui.BeginTabItem("Train"))
+                {
+                    DrawTrainTab();
                     ImGui.EndTabItem();
                 }
 
@@ -228,6 +266,121 @@ public sealed class Plugin : IDalamudPlugin
                 ImGui.Separator();
                 ImGui.TextWrapped($"Last post: {_lastPostResult}");
             }
+        }
+        ImGui.End();
+    }
+
+
+    /// <summary>
+    /// Our own detected train list, with per-row teleport and map-flag actions.
+    /// Drawn in both the Train tab and the standalone popout.
+    /// </summary>
+    private void DrawTrainList()
+    {
+        var marks = _detector.Marks.Values
+            .OrderBy(m => ExpansionData.Lookup(m.NameId)?.Order ?? int.MaxValue)
+            .ThenBy(m => ExpansionData.Lookup(m.NameId)?.ZoneOrder ?? int.MaxValue)
+            .ThenBy(m => m.Name)
+            .ToList();
+
+        if (marks.Count == 0)
+        {
+            ImGui.TextDisabled("No marks detected yet — fly near one and it'll appear here.");
+            return;
+        }
+
+        (uint, uint)? toRemove = null;
+
+        foreach (var mark in marks)
+        {
+            ImGui.PushID($"{mark.NameId}_{mark.Instance}");
+
+            var info = ExpansionData.Lookup(mark.NameId);
+            var zone = info?.Location ?? "?";
+            var glyph = ExpansionData.InstanceGlyph(mark.Instance);
+
+            var dead = mark.Dead;
+            if (ImGui.Checkbox("##dead", ref dead))
+            {
+                mark.Dead = dead;
+                mark.DeathObservedAtUtc = dead ? DateTime.UtcNow : null;
+            }
+
+            ImGui.SameLine();
+            if (mark.Dead)
+                ImGui.TextDisabled($"{zone} — {mark.Name}{glyph}");
+            else
+                ImGui.TextWrapped($"{zone} — {mark.Name}{glyph}");
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("tele"))
+            {
+                if (!_teleport.TeleportToNearest(mark.TerritoryId, mark.MapPosition))
+                    _lastPostResult = _teleport.LastError;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("flag"))
+            {
+                if (!MapFlagHelper.FlagMark(_gameGui, mark))
+                    _lastPostResult = "Could not open the map for that mark.";
+            }
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("x"))
+            {
+                toRemove = (mark.NameId, mark.Instance);
+            }
+
+            ImGui.PopID();
+        }
+
+        if (toRemove.HasValue) _detector.Remove(toRemove.Value);
+    }
+
+    private void DrawTrainTab()
+    {
+        ImGui.Spacing();
+
+        var useOwn = _config.UseOwnTrainList;
+        if (ImGui.Checkbox("Use this list for reports (instead of Hunt Helper's)", ref useOwn))
+        {
+            _config.UseOwnTrainList = useOwn;
+            _config.Save();
+        }
+        ImGui.TextDisabled("Both lists always populate, so you can compare them before switching over.");
+
+        ImGui.Spacing();
+        if (ImGui.Button("Open Train Popout"))
+        {
+            _trainPopoutVisible = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Remove Dead"))
+        {
+            _detector.RemoveDead();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Clear All"))
+        {
+            _detector.Clear();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        DrawTrainList();
+    }
+
+    private void DrawTrainPopout()
+    {
+        if (!_trainPopoutVisible) return;
+
+        ImGui.SetNextWindowSize(new Vector2(360, 320), ImGuiCond.FirstUseEver);
+        if (ImGui.Begin("Hunt Train", ref _trainPopoutVisible))
+        {
+            DrawTrainList();
         }
         ImGui.End();
     }
@@ -618,5 +771,6 @@ public sealed class Plugin : IDalamudPlugin
         _pluginInterface.UiBuilder.Draw -= DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi -= OnOpenConfigUi;
         _commandManager.RemoveHandler(ConfigCommand);
+        _commandManager.RemoveHandler(TrainCommand);
     }
 }

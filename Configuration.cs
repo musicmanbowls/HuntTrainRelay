@@ -72,6 +72,14 @@ public class Configuration : IPluginConfiguration
     /// Print a local chat reminder on entering Lakeland (Tyger), Ultima Thule
     /// (Narrow-rift) or Elpis (Ophioneus).
     /// </summary>
+    /// <summary>
+    /// Use our own mark detection for reports instead of Hunt Helper's list.
+    /// Defaults to false so updating changes nothing until deliberately switched
+    /// — both lists are always populated, so they can be compared side by side
+    /// on the Train tab first.
+    /// </summary>
+    public bool UseOwnTrainList { get; set; } = false;
+
     public bool SRankZoneReminderEnabled { get; set; } = true;
 
     /// <summary>

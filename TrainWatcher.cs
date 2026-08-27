@@ -37,6 +37,7 @@ public class TrainWatcher : IDisposable
     private readonly IFramework _framework;
     private readonly HuntHelperIpc _ipc;
     private readonly HuntTallyIpc _huntTally;
+    private readonly MarkDetector _detector;
     private readonly Configuration _config;
 
     private readonly Dictionary<(uint ModelId, uint Instance), TrackedMark> _tracked = new();
@@ -66,11 +67,12 @@ public class TrainWatcher : IDisposable
     /// <summary>Number of marks auto-marked dead by Hunt Tally this train.</summary>
     public int AutoMarkedCount { get; private set; }
 
-    public TrainWatcher(IFramework framework, HuntHelperIpc ipc, HuntTallyIpc huntTally, Configuration config)
+    public TrainWatcher(IFramework framework, HuntHelperIpc ipc, HuntTallyIpc huntTally, MarkDetector detector, Configuration config)
     {
         _framework = framework;
         _ipc = ipc;
         _huntTally = huntTally;
+        _detector = detector;
         _config = config;
         _huntTally.KillReceived += OnHuntTallyKill;
         _framework.Update += OnUpdate;
@@ -127,6 +129,7 @@ public class TrainWatcher : IDisposable
     public void ResetNow()
     {
         _tracked.Clear();
+        _detector.Clear();
         _seenKills.Clear();
         AutoMarkedCount = 0;
         while (_pendingKills.TryDequeue(out _)) { }
@@ -135,6 +138,17 @@ public class TrainWatcher : IDisposable
 
     private void Poll()
     {
+        // Always scan with our own detector, even when Hunt Helper is the active
+        // source — that's what makes side-by-side comparison possible.
+        try
+        {
+            _detector.Scan();
+        }
+        catch (Exception ex)
+        {
+            LastStatus = $"Own detection error: {ex.Message}";
+        }
+
         var list = _ipc.TryGetTrainList();
         if (list == null)
         {
@@ -203,7 +217,9 @@ public class TrainWatcher : IDisposable
 
         var deadCount = _tracked.Values.Count(m => m.Dead);
         var autoPart = AutoMarkedCount > 0 ? $" ({AutoMarkedCount} auto)" : string.Empty;
-        LastStatus = $"Tracking {_tracked.Count} marks, {deadCount} dead{autoPart}.";
+        var ownCount = _detector.Marks.Count;
+        var ownDead = _detector.Marks.Values.Count(m => m.Dead);
+        LastStatus = $"Hunt Helper: {_tracked.Count} marks, {deadCount} dead{autoPart}. Own: {ownCount} marks, {ownDead} dead.";
     }
 
     /// <summary>
@@ -228,12 +244,26 @@ public class TrainWatcher : IDisposable
             var dedupeKey = (kill.NameId, kill.TerritoryId, kill.InstanceId, kill.UnixSeconds);
             if (!_seenKills.Add(dedupeKey)) continue;
 
-            if (!_tracked.TryGetValue((kill.NameId, kill.InstanceId), out var mark)) continue;
-            if (mark.Dead) continue;
+            var killTime = DateTimeOffset.FromUnixTimeSeconds(kill.UnixSeconds).UtcDateTime;
+            var matched = false;
 
-            mark.Dead = true;
-            mark.DeathObservedAtUtc = DateTimeOffset.FromUnixTimeSeconds(kill.UnixSeconds).UtcDateTime;
-            AutoMarkedCount++;
+            // Our own detected list
+            if (_detector.Marks.TryGetValue((kill.NameId, kill.InstanceId), out var own) && !own.Dead)
+            {
+                own.Dead = true;
+                own.DeathObservedAtUtc = killTime;
+                matched = true;
+            }
+
+            // The Hunt Helper-derived list
+            if (_tracked.TryGetValue((kill.NameId, kill.InstanceId), out var mark) && !mark.Dead)
+            {
+                mark.Dead = true;
+                mark.DeathObservedAtUtc = killTime;
+                matched = true;
+            }
+
+            if (matched) AutoMarkedCount++;
         }
     }
 }
