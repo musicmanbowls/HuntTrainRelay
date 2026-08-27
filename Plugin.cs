@@ -56,6 +56,7 @@ public sealed class Plugin : IDalamudPlugin
     private bool _trainPopoutVisible;
     private bool _counterPopoutVisible;
     private string _importCode = string.Empty;
+    private int _draggingIndex = -1;
     private string _lastPostResult = string.Empty;
     private int _selectedNarrowRiftSpawn;
 
@@ -306,12 +307,13 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     /// <summary>
     /// The train list, in scouted order (or whatever order it's been dragged
-    /// into). Row layout is: drag handle, then the mark (click to flag), then
-    /// teleport, remove, and a dead indicator.
+    /// into), styled after Hunt Helper's: full-width highlighted rows separated
+    /// by lines.
     ///
-    /// Reordering is deliberately restricted to the handle and requires the
-    /// cursor to travel a full row height before anything swaps — dragging
-    /// anywhere on the row with no threshold was far too twitchy.
+    /// A quick click echoes the mark to chat (with a clickable map link) and
+    /// opens the map. Click and hold, then move, to drag the row to a new
+    /// position — the row follows the cursor and the click is suppressed once
+    /// a drag starts, so the two never fire together.
     /// </summary>
     private void DrawTrainList()
     {
@@ -326,6 +328,8 @@ public sealed class Plugin : IDalamudPlugin
         (uint, uint)? toRemove = null;
         var rowHeight = ImGui.GetTextLineHeightWithSpacing();
 
+        ImGui.Separator();
+
         for (var i = 0; i < marks.Count; i++)
         {
             var mark = marks[i];
@@ -334,37 +338,47 @@ public sealed class Plugin : IDalamudPlugin
             var info = ExpansionData.Lookup(mark.NameId);
             var zone = info?.Location ?? "?";
             var glyph = ExpansionData.InstanceGlyph(mark.Instance);
+            var label = $"「{zone}」  {mark.Name}{glyph}";
 
-            // --- drag handle ---
-            ImGui.Selectable("≡", false, ImGuiSelectableFlags.None, new Vector2(18, 0));
-            if (ImGui.IsItemActive())
+            if (mark.Dead) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.45f, 0.45f, 0.45f, 1f));
+
+            // Full-width selectable: gives the hover/active highlight, and is
+            // both the click target and the drag handle.
+            ImGui.Selectable(label, _draggingIndex == i, ImGuiSelectableFlags.AllowDoubleClick,
+                new Vector2(230, 0));
+
+            if (mark.Dead) ImGui.PopStyleColor();
+
+            var itemActive = ImGui.IsItemActive();
+
+            if (itemActive)
             {
                 var dragY = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y;
 
-                // Require a full row of travel before swapping, so small jitters
-                // while clicking don't reorder anything.
+                // Once the cursor has travelled a full row, treat it as a drag
+                // rather than a click and start moving the row.
                 if (Math.Abs(dragY) > rowHeight)
                 {
+                    _draggingIndex = i;
                     var next = i + (dragY < 0f ? -1 : 1);
                     if (next >= 0 && next < marks.Count)
                     {
                         _detector.Reorder(i, next);
                         ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
+                        _draggingIndex = next;
                     }
                 }
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Drag to reorder");
 
-            // --- mark name, click to flag ---
-            ImGui.SameLine();
-            var label = $"{zone} — {mark.Name}{glyph}";
-            if (mark.Dead) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
-            if (ImGui.Selectable(label, false, ImGuiSelectableFlags.None, new Vector2(210, 0)))
+            // Fire the click only on release, and only if no drag happened.
+            if (ImGui.IsItemDeactivated())
             {
-                if (!MapFlagHelper.FlagMark(_gameGui, mark))
-                    _lastPostResult = "Could not open the map for that mark.";
+                if (_draggingIndex == -1)
+                {
+                    TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
+                }
+                _draggingIndex = -1;
             }
-            if (mark.Dead) ImGui.PopStyleColor();
 
             ImGui.SameLine();
             if (ImGui.SmallButton("tele"))
@@ -379,8 +393,8 @@ public sealed class Plugin : IDalamudPlugin
                 toRemove = (mark.NameId, mark.Instance);
             }
 
-            // --- dead indicator (normally set automatically by Hunt Tally,
-            //     but still clickable as a manual fallback) ---
+            // Dead indicator — normally set automatically by Hunt Tally, but
+            // clickable as a manual fallback.
             ImGui.SameLine();
             if (ImGui.RadioButton("##dead", mark.Dead))
             {
@@ -390,13 +404,14 @@ public sealed class Plugin : IDalamudPlugin
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip(mark.Dead ? "Dead — click to undo" : "Alive — set automatically when killed");
 
+            ImGui.Separator();
             ImGui.PopID();
         }
 
         if (toRemove.HasValue) _detector.Remove(toRemove.Value);
 
         ImGui.Spacing();
-        ImGui.TextDisabled("Click a mark to flag it. Drag the ≡ handle to reorder.");
+        ImGui.TextDisabled("Click a mark to echo + flag it. Click and hold to drag it into a new position.");
     }
 
     private void DrawTrainTab()
