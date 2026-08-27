@@ -24,6 +24,14 @@ public class FlagEntry
 {
     public string Label { get; set; } = string.Empty;
     public SpawnStatus SpawnStatus { get; set; } = SpawnStatus.Unknown;
+
+    /// <summary>Zone this watch belongs to, so the zone-entry reminder can match it.</summary>
+    public uint TerritoryId { get; set; }
+
+    /// <summary>Map coordinates of the chosen spawn spot, if one was picked.</summary>
+    public bool HasLocation { get; set; }
+    public float X { get; set; }
+    public float Y { get; set; }
 }
 
 [Serializable]

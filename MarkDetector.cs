@@ -55,6 +55,24 @@ public sealed class MarkDetector
 
     public void Clear() => _marks.Clear();
 
+    /// <summary>
+    /// Folds an imported list into the current one. Existing entries win, so
+    /// importing never overwrites a mark you've personally seen (and possibly
+    /// already marked dead). Returns how many were genuinely new.
+    /// </summary>
+    public int Merge(IEnumerable<DetectedMark> incoming)
+    {
+        var added = 0;
+        foreach (var mark in incoming)
+        {
+            var key = (mark.NameId, mark.Instance);
+            if (_marks.ContainsKey(key)) continue;
+            _marks[key] = mark;
+            added++;
+        }
+        return added;
+    }
+
     public void Remove((uint NameId, uint Instance) key) => _marks.Remove(key);
 
     /// <summary>

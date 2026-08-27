@@ -16,6 +16,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private const string ConfigCommand = "/htr";
     private const string TrainCommand = "/htrt";
+    private const string CounterCommand = "/htrc";
     private const int MaxWebhooks = 5;
     private const int MaxAdditionalScouts = 3;
 
@@ -41,6 +42,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MarkDetector _detector;
     private readonly TeleportHelper _teleport;
     private readonly IGameGui _gameGui;
+    private readonly HuntCounter _counter;
 
     private readonly Configuration _config;
     private readonly HuntHelperIpc _ipc;
@@ -49,6 +51,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private bool _configWindowVisible;
     private bool _trainPopoutVisible;
+    private bool _counterPopoutVisible;
+    private string _importCode = string.Empty;
     private string _lastPostResult = string.Empty;
     private int _selectedNarrowRiftSpawn;
 
@@ -78,7 +82,8 @@ public sealed class Plugin : IDalamudPlugin
         _detector = new MarkDetector(objectTable, clientState, dataManager);
         _teleport = new TeleportHelper(_pluginInterface, _log);
         _watcher = new TrainWatcher(framework, _ipc, _huntTally, _detector, _config);
-        _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config);
+        _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config, _detector);
+        _counter = new HuntCounter(chatGui);
 
         _commandManager.AddHandler(ConfigCommand, new CommandInfo(OnCommand)
         {
@@ -90,6 +95,11 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Open the Hunt Train Relay train list popout.",
         });
 
+        _commandManager.AddHandler(CounterCommand, new CommandInfo(OnCounterCommand)
+        {
+            HelpMessage = "Open the Hunt Train Relay mob counter popout.",
+        });
+
         _pluginInterface.UiBuilder.Draw += DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi += OnOpenConfigUi;
     }
@@ -97,6 +107,8 @@ public sealed class Plugin : IDalamudPlugin
     private void OnCommand(string command, string args) => _configWindowVisible = true;
 
     private void OnTrainCommand(string command, string args) => _trainPopoutVisible = true;
+
+    private void OnCounterCommand(string command, string args) => _counterPopoutVisible = true;
 
     private void OnOpenConfigUi() => _configWindowVisible = true;
 
@@ -158,7 +170,19 @@ public sealed class Plugin : IDalamudPlugin
 
     private async Task SendScoutingReportAsync()
     {
-        var list = _ipc.TryGetTrainList();
+        List<HuntHelperMobRecord>? list;
+
+        if (_config.UseOwnTrainList)
+        {
+            list = _detector.Marks.Values.Select(d => new HuntHelperMobRecord(
+                d.Name, d.NameId, d.TerritoryId, d.MapId, d.Instance,
+                d.MapPosition, d.Dead, d.LastSeenUtc)).ToList();
+        }
+        else
+        {
+            list = _ipc.TryGetTrainList();
+        }
+
         if (list == null)
         {
             _lastPostResult = "Hunt Helper not detected — can't build a scouting report.";
@@ -219,6 +243,7 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawUI()
     {
         DrawTrainPopout();
+        DrawCounterPopout();
 
         if (!_configWindowVisible) return;
 
@@ -367,6 +392,40 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ImGui.Spacing();
+        if (ImGui.Button("Copy Export Code"))
+        {
+            if (_detector.Marks.Count == 0)
+            {
+                _lastPostResult = "Nothing to export — no marks detected yet.";
+            }
+            else
+            {
+                ImGui.SetClipboardText(TrainExchange.Export(_detector.Marks.Values));
+                _lastPostResult = $"Exported {_detector.Marks.Count} marks to clipboard.";
+            }
+        }
+        ImGui.TextDisabled("Uses Hunt Helper's own format — the code pastes into Hunt Helper too.");
+
+        ImGui.Spacing();
+        ImGui.SetNextItemWidth(260);
+        ImGui.InputTextWithHint("##importCode", "Paste an import code here", ref _importCode, 65536);
+        ImGui.SameLine();
+        if (ImGui.Button("Import"))
+        {
+            var imported = TrainExchange.Import(_importCode);
+            if (imported == null)
+            {
+                _lastPostResult = "That import code couldn't be read.";
+            }
+            else
+            {
+                var added = _detector.Merge(imported);
+                _importCode = string.Empty;
+                _lastPostResult = $"Imported {imported.Count} marks ({added} new).";
+            }
+        }
+
+        ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -381,6 +440,42 @@ public sealed class Plugin : IDalamudPlugin
         if (ImGui.Begin("Hunt Train", ref _trainPopoutVisible))
         {
             DrawTrainList();
+        }
+        ImGui.End();
+    }
+
+
+    private void DrawCounterList()
+    {
+        foreach (var def in HuntCounter.Definitions)
+        {
+            ImGui.PushID(def.MarkName);
+            ImGui.TextWrapped($"{def.MarkName} ({def.Expansion})");
+
+            foreach (var mob in def.MobNames)
+            {
+                var count = _counter.Tallies.TryGetValue(mob, out var c) ? c : 0;
+                ImGui.TextDisabled($"    {mob}: {count}");
+            }
+
+            if (ImGui.SmallButton("Reset"))
+            {
+                _counter.ResetFor(def);
+            }
+
+            ImGui.Separator();
+            ImGui.PopID();
+        }
+    }
+
+    private void DrawCounterPopout()
+    {
+        if (!_counterPopoutVisible) return;
+
+        ImGui.SetNextWindowSize(new Vector2(300, 400), ImGuiCond.FirstUseEver);
+        if (ImGui.Begin("Hunt Counter", ref _counterPopoutVisible))
+        {
+            DrawCounterList();
         }
         ImGui.End();
     }
@@ -460,7 +555,11 @@ public sealed class Plugin : IDalamudPlugin
         {
             if (ImGui.Button($"Watch {name}"))
             {
-                _config.Flags.Add(new FlagEntry { Label = name });
+                _config.Flags.Add(new FlagEntry
+                {
+                    Label = name,
+                    TerritoryId = name == "Tyger" ? 813u : 961u, // Lakeland / Elpis
+                });
                 _config.Save();
             }
             ImGui.SameLine();
@@ -476,6 +575,10 @@ public sealed class Plugin : IDalamudPlugin
             _config.Flags.Add(new FlagEntry
             {
                 Label = $"Narrow-rift — Spawn {_selectedNarrowRiftSpawn + 1} ({spot.X:F1}, {spot.Y:F1})",
+                TerritoryId = 960, // Ultima Thule
+                HasLocation = true,
+                X = spot.X,
+                Y = spot.Y,
             });
             _config.Save();
         }
@@ -537,6 +640,26 @@ public sealed class Plugin : IDalamudPlugin
             "Additional scouts — credit anyone else whose scouting you folded into this report " +
             "(e.g. they sent you their Hunt Helper export code privately and you imported it)."
         );
+        ImGui.Spacing();
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        if (ImGui.Button("Open Counter Popout"))
+        {
+            _counterPopoutVisible = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Reset All Counts"))
+        {
+            _counter.Reset();
+        }
+        ImGui.TextDisabled("Counts trigger-mob kills for S-ranks that need them (also /htrc).");
+        ImGui.Spacing();
+        DrawCounterList();
+
+        ImGui.Spacing();
+        ImGui.Separator();
         ImGui.Spacing();
 
         ImGui.PushID("scouts");
@@ -768,9 +891,11 @@ public sealed class Plugin : IDalamudPlugin
         _watcher.Dispose();
         _huntTally.Dispose();
         _zoneReminder.Dispose();
+        _counter.Dispose();
         _pluginInterface.UiBuilder.Draw -= DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi -= OnOpenConfigUi;
         _commandManager.RemoveHandler(ConfigCommand);
         _commandManager.RemoveHandler(TrainCommand);
+        _commandManager.RemoveHandler(CounterCommand);
     }
 }

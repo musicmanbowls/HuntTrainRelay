@@ -1,6 +1,8 @@
+using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace HuntTrainRelay;
 
@@ -32,15 +34,17 @@ public sealed class SRankZoneReminder : IDisposable
     private readonly IChatGui _chatGui;
     private readonly IPluginLog _log;
     private readonly Configuration _config;
+    private readonly MarkDetector _detector;
 
     private readonly Dictionary<uint, DateTime> _lastFiredUtc = new();
 
-    public SRankZoneReminder(IClientState clientState, IChatGui chatGui, IPluginLog log, Configuration config)
+    public SRankZoneReminder(IClientState clientState, IChatGui chatGui, IPluginLog log, Configuration config, MarkDetector detector)
     {
         _clientState = clientState;
         _chatGui = chatGui;
         _log = log;
         _config = config;
+        _detector = detector;
 
         _clientState.TerritoryChanged += OnTerritoryChanged;
     }
@@ -59,7 +63,33 @@ public sealed class SRankZoneReminder : IDisposable
         if (_lastFiredUtc.TryGetValue(territoryId, out var last) && now - last < Cooldown) return;
         _lastFiredUtc[territoryId] = now;
 
-        _chatGui.Print($"[Hunt Train Relay] REMINDER TO CHECK {markName.ToUpperInvariant()}");
+        // If the conductor added a watch for this mark with a specific spawn
+        // spot chosen, include it — and make it a clickable flag so they can
+        // jump straight there rather than reading coordinates off the screen.
+        var watch = _config.Flags.FirstOrDefault(f =>
+            f.TerritoryId == territoryId && f.HasLocation);
+
+        if (watch != null)
+        {
+            var mapId = _detector.GetMapId(territoryId);
+            if (mapId != 0)
+            {
+                var link = SeString.CreateMapLink(territoryId, mapId, watch.X, watch.Y);
+                var msg = new SeStringBuilder()
+                    .AddText($"[Hunt Train Relay] REMINDER TO CHECK {markName.ToUpperInvariant()} — ")
+                    .Append(link)
+                    .Build();
+                _chatGui.Print(msg);
+            }
+            else
+            {
+                _chatGui.Print($"[Hunt Train Relay] REMINDER TO CHECK {markName.ToUpperInvariant()} ({watch.X:F1}, {watch.Y:F1})");
+            }
+        }
+        else
+        {
+            _chatGui.Print($"[Hunt Train Relay] REMINDER TO CHECK {markName.ToUpperInvariant()}");
+        }
 
         if (_config.SRankZoneReminderSound)
             PlayReminderSound();
