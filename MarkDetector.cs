@@ -74,21 +74,27 @@ public sealed class MarkDetector
     public List<DetectedMark> Ordered() => _marks.Values.OrderBy(m => m.Order).ToList();
 
     /// <summary>
-    /// Moves the mark at one position in the ordered list to another, shuffling
-    /// the rest along. Used by drag-and-drop reordering.
+    /// Rewrites every mark's Order to match the given sequence. Used after a
+    /// drag swap so the new arrangement sticks.
     /// </summary>
-    public void Reorder(int fromIndex, int toIndex)
+    public void ApplyOrder(IReadOnlyList<DetectedMark> ordered)
     {
-        var list = Ordered();
-        if (fromIndex < 0 || fromIndex >= list.Count) return;
-        if (toIndex < 0 || toIndex >= list.Count) return;
+        for (var i = 0; i < ordered.Count; i++)
+            ordered[i].Order = i;
 
-        var moving = list[fromIndex];
-        list.RemoveAt(fromIndex);
-        list.Insert(toIndex, moving);
+        _nextOrder = ordered.Count;
+    }
 
-        for (var i = 0; i < list.Count; i++) list[i].Order = i;
-        _nextOrder = list.Count;
+    public void Remove((uint NameId, uint Instance) key) => _marks.Remove(key);
+
+    /// <summary>
+    /// Removes every mark currently flagged dead — the equivalent of Hunt
+    /// Helper's own "Remove Dead" tidy-up.
+    /// </summary>
+    public void RemoveDead()
+    {
+        foreach (var key in _marks.Where(kv => kv.Value.Dead).Select(kv => kv.Key).ToList())
+            _marks.Remove(key);
     }
 
     /// <summary>
@@ -108,18 +114,6 @@ public sealed class MarkDetector
             added++;
         }
         return added;
-    }
-
-    public void Remove((uint NameId, uint Instance) key) => _marks.Remove(key);
-
-    /// <summary>
-    /// Removes every mark currently flagged dead — the equivalent of Hunt
-    /// Helper's own "Remove Dead" tidy-up.
-    /// </summary>
-    public void RemoveDead()
-    {
-        foreach (var key in _marks.Where(kv => kv.Value.Dead).Select(kv => kv.Key).ToList())
-            _marks.Remove(key);
     }
 
     /// <summary>

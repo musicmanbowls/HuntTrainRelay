@@ -56,10 +56,6 @@ public sealed class Plugin : IDalamudPlugin
     private bool _trainPopoutVisible;
     private bool _counterPopoutVisible;
     private string _importCode = string.Empty;
-    private int _draggingIndex = -1;
-
-    // Pixels of travel before a hold counts as a drag rather than a click.
-    private const float DragClickThreshold = 4f;
 
     // Measured on the previous frame. The drag threshold has to match the real
     // on-screen row pitch (selectable + buttons + separator), not just a line of
@@ -315,20 +311,16 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     /// <summary>
     /// The train list, in scouted order (or whatever order it's been dragged
-    /// into), styled after Hunt Helper's: full-width highlighted rows separated
-    /// by lines.
+    /// into). Click a row to echo it to chat and flag it; click and drag to
+    /// move it.
     ///
-    /// A quick click echoes the mark to chat (with a clickable map link) and
-    /// opens the map. Click, hold and move to drag the row somewhere else.
-    ///
-    /// Reordering deliberately does NOT work off a pixel distance. An earlier
-    /// version swapped rows every time the cursor travelled one text-line, but
-    /// real rows are taller than that once separators and padding are counted,
-    /// so the list crept ahead of the pointer and the gap compounded. Instead a
-    /// swap happens only once the cursor has genuinely left the row being
-    /// dragged: after each swap the row lands back under the cursor, which
-    /// stops further swaps until the mouse actually moves on. That self-paces
-    /// regardless of row height, so it can never outrun the pointer.
+    /// The click/drag handling is a direct port of Hunt Helper's own
+    /// (HuntTrainUI.cs, img02/HuntHelper, MIT licensed), including its exact
+    /// drag-delta thresholds. The important part is that everything is gated on
+    /// ImGui.IsItemFocused(): only one row can hold focus, so at most one swap
+    /// can happen per frame. Earlier attempts here tracked the dragged row in a
+    /// field and reassigned it mid-loop, which let a single frame cascade swaps
+    /// all the way down the list.
     /// </summary>
     private void DrawTrainList()
     {
@@ -355,40 +347,33 @@ public sealed class Plugin : IDalamudPlugin
             var label = $"「{zone}」  {mark.Name}{glyph}";
 
             if (mark.Dead) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.45f, 0.45f, 0.45f, 1f));
-
-            ImGui.Selectable(label, _draggingIndex == i, ImGuiSelectableFlags.None, new Vector2(230, 0));
-
+            ImGui.Selectable(label, false, ImGuiSelectableFlags.None, new Vector2(230, 0));
             if (mark.Dead) ImGui.PopStyleColor();
 
-            if (ImGui.IsItemActive())
+            if (ImGui.IsItemFocused())
             {
-                var dragY = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y;
-
-                // A few pixels of travel is enough to call this a drag rather
-                // than a click. This only decides whether to suppress the click
-                // echo on release — it doesn't decide when to move anything.
-                if (Math.Abs(dragY) > DragClickThreshold)
-                    _draggingIndex = i;
-
-                if (_draggingIndex == i && !ImGui.IsItemHovered())
+                // A release with essentially no movement is a click, not a drag.
+                if (ImGui.IsMouseReleased(ImGuiMouseButton.Left)
+                    && Math.Abs(ImGui.GetMouseDragDelta().Y) < 0.1f)
                 {
-                    var next = i + (dragY < 0f ? -1 : 1);
+                    TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
+                }
+
+                // Swap only once the cursor has left this row, one step at a time.
+                if (!ImGui.IsItemHovered())
+                {
+                    var next = i;
+                    var dragY = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y;
+                    if (dragY < 0.3f) next -= 1;
+                    else if (dragY > 0f) next += 1;
+
                     if (next >= 0 && next < marks.Count)
                     {
-                        _detector.Reorder(i, next);
-                        ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
-                        _draggingIndex = next;
+                        (marks[i], marks[next]) = (marks[next], marks[i]);
+                        _detector.ApplyOrder(marks);
+                        ImGui.ResetMouseDragDelta();
                     }
                 }
-            }
-
-            // Fire the click only on release, and only if no drag happened.
-            if (ImGui.IsItemDeactivated())
-            {
-                if (_draggingIndex == -1)
-                    TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
-
-                _draggingIndex = -1;
             }
 
             ImGui.SameLine();
@@ -422,7 +407,7 @@ public sealed class Plugin : IDalamudPlugin
         if (toRemove.HasValue) _detector.Remove(toRemove.Value);
 
         ImGui.Spacing();
-        ImGui.TextDisabled("Click a mark to echo + flag it. Click and hold to drag it into a new position.");
+        ImGui.TextDisabled("Click a mark to echo + flag it. Click and drag to move it in the list.");
     }
 
     private void DrawTrainTab()
