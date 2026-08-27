@@ -36,6 +36,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly IChatGui _chatGui;
     private readonly IObjectTable _objectTable;
     private readonly IPluginLog _log;
+    private readonly SRankZoneReminder _zoneReminder;
 
     private readonly Configuration _config;
     private readonly HuntHelperIpc _ipc;
@@ -52,6 +53,7 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IChatGui chatGui,
         IObjectTable objectTable,
+        IClientState clientState,
         IPluginLog pluginLog)
     {
         _pluginInterface = pluginInterface;
@@ -66,6 +68,7 @@ public sealed class Plugin : IDalamudPlugin
         _ipc = new HuntHelperIpc(_pluginInterface);
         _huntTally = new HuntTallyIpc(_pluginInterface, _log);
         _watcher = new TrainWatcher(framework, _ipc, _huntTally, _config);
+        _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config);
 
         _commandManager.AddHandler(ConfigCommand, new CommandInfo(OnCommand)
         {
@@ -278,6 +281,27 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Spacing();
 
         ImGui.TextWrapped("S-Rank Watches");
+
+        var reminderOn = _config.SRankZoneReminderEnabled;
+        if (ImGui.Checkbox("Remind me on entering an S-rank zone", ref reminderOn))
+        {
+            _config.SRankZoneReminderEnabled = reminderOn;
+            _config.Save();
+        }
+
+        if (_config.SRankZoneReminderEnabled)
+        {
+            ImGui.SameLine();
+            var reminderSound = _config.SRankZoneReminderSound;
+            if (ImGui.Checkbox("with sound", ref reminderSound))
+            {
+                _config.SRankZoneReminderSound = reminderSound;
+                _config.Save();
+            }
+        }
+        ImGui.TextDisabled("Lakeland (Tyger), Ultima Thule (Narrow-rift), Elpis (Ophioneus). Only you see it.");
+
+        ImGui.Spacing();
 
         foreach (var name in SimpleSRanks)
         {
@@ -590,6 +614,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         _watcher.Dispose();
         _huntTally.Dispose();
+        _zoneReminder.Dispose();
         _pluginInterface.UiBuilder.Draw -= DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi -= OnOpenConfigUi;
         _commandManager.RemoveHandler(ConfigCommand);

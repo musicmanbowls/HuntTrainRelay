@@ -49,6 +49,7 @@ public class TrainWatcher : IDisposable
     private readonly HashSet<(uint, uint, uint, long)> _seenKills = new();
 
     private double _secondsSinceLastPoll;
+    private double _secondsSinceConnectAttempt;
 
     public string LastStatus { get; private set; } = "Idle.";
 
@@ -94,6 +95,20 @@ public class TrainWatcher : IDisposable
 
     private void OnUpdate(IFramework framework)
     {
+        // Retry the Hunt Tally connection regardless of tracking state. Plugin
+        // load order isn't guaranteed, so if Hunt Tally came up after us, the
+        // one attempt at construction would otherwise never be retried until
+        // someone happened to enable tracking.
+        if (!_huntTally.Connected)
+        {
+            _secondsSinceConnectAttempt += framework.UpdateDelta.TotalSeconds;
+            if (_secondsSinceConnectAttempt >= 5)
+            {
+                _secondsSinceConnectAttempt = 0;
+                _huntTally.EnsureConnected();
+            }
+        }
+
         if (!_config.TrackingEnabled) return;
 
         _secondsSinceLastPoll += framework.UpdateDelta.TotalSeconds;
@@ -120,8 +135,6 @@ public class TrainWatcher : IDisposable
 
     private void Poll()
     {
-        _huntTally.EnsureConnected();
-
         var list = _ipc.TryGetTrainList();
         if (list == null)
         {

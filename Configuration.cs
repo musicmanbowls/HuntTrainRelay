@@ -69,6 +69,19 @@ public class Configuration : IPluginConfiguration
     public bool AutoMarkDeadEnabled { get; set; } = true;
 
     /// <summary>
+    /// Print a local chat reminder on entering Lakeland (Tyger), Ultima Thule
+    /// (Narrow-rift) or Elpis (Ophioneus).
+    /// </summary>
+    public bool SRankZoneReminderEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Also play a sound with that reminder. Separate toggle because the sound
+    /// needs a ClientStructs call, which is a slightly less stable API surface
+    /// than the rest of the plugin — if it ever misbehaves, the message can stay.
+    /// </summary>
+    public bool SRankZoneReminderSound { get; set; } = true;
+
+    /// <summary>
     /// Extra names credited alongside the submitting character on a scouting
     /// report — e.g. a friend who scouted one expansion and sent you their
     /// Hunt Helper export code privately to fold into the combined report.
