@@ -306,8 +306,12 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     /// <summary>
     /// The train list, in scouted order (or whatever order it's been dragged
-    /// into). Clicking a row flags it on the map; rows can be dragged up and
-    /// down to reorder, matching Hunt Helper's behaviour.
+    /// into). Row layout is: drag handle, then the mark (click to flag), then
+    /// teleport, remove, and a dead indicator.
+    ///
+    /// Reordering is deliberately restricted to the handle and requires the
+    /// cursor to travel a full row height before anything swaps — dragging
+    /// anywhere on the row with no threshold was far too twitchy.
     /// </summary>
     private void DrawTrainList()
     {
@@ -320,6 +324,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         (uint, uint)? toRemove = null;
+        var rowHeight = ImGui.GetTextLineHeightWithSpacing();
 
         for (var i = 0; i < marks.Count; i++)
         {
@@ -330,38 +335,36 @@ public sealed class Plugin : IDalamudPlugin
             var zone = info?.Location ?? "?";
             var glyph = ExpansionData.InstanceGlyph(mark.Instance);
 
-            var dead = mark.Dead;
-            if (ImGui.Checkbox("##dead", ref dead))
+            // --- drag handle ---
+            ImGui.Selectable("≡", false, ImGuiSelectableFlags.None, new Vector2(18, 0));
+            if (ImGui.IsItemActive())
             {
-                mark.Dead = dead;
-                mark.DeathObservedAtUtc = dead ? DateTime.UtcNow : null;
+                var dragY = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y;
+
+                // Require a full row of travel before swapping, so small jitters
+                // while clicking don't reorder anything.
+                if (Math.Abs(dragY) > rowHeight)
+                {
+                    var next = i + (dragY < 0f ? -1 : 1);
+                    if (next >= 0 && next < marks.Count)
+                    {
+                        _detector.Reorder(i, next);
+                        ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
+                    }
+                }
             }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Drag to reorder");
 
+            // --- mark name, click to flag ---
             ImGui.SameLine();
-
-            // Selectable makes the whole row clickable (flag) and draggable.
             var label = $"{zone} — {mark.Name}{glyph}";
             if (mark.Dead) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
-            ImGui.Selectable(label, false, ImGuiSelectableFlags.None, new Vector2(230, 0));
-            if (mark.Dead) ImGui.PopStyleColor();
-
-            if (ImGui.IsItemClicked() && !ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+            if (ImGui.Selectable(label, false, ImGuiSelectableFlags.None, new Vector2(210, 0)))
             {
                 if (!MapFlagHelper.FlagMark(_gameGui, mark))
                     _lastPostResult = "Could not open the map for that mark.";
             }
-
-            // Classic ImGui drag-to-reorder: while the row is held and the
-            // cursor has moved off it, swap with the neighbour in that direction.
-            if (ImGui.IsItemActive() && !ImGui.IsItemHovered())
-            {
-                var next = i + (ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y < 0f ? -1 : 1);
-                if (next >= 0 && next < marks.Count)
-                {
-                    _detector.Reorder(i, next);
-                    ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
-                }
-            }
+            if (mark.Dead) ImGui.PopStyleColor();
 
             ImGui.SameLine();
             if (ImGui.SmallButton("tele"))
@@ -376,13 +379,24 @@ public sealed class Plugin : IDalamudPlugin
                 toRemove = (mark.NameId, mark.Instance);
             }
 
+            // --- dead indicator (normally set automatically by Hunt Tally,
+            //     but still clickable as a manual fallback) ---
+            ImGui.SameLine();
+            if (ImGui.RadioButton("##dead", mark.Dead))
+            {
+                mark.Dead = !mark.Dead;
+                mark.DeathObservedAtUtc = mark.Dead ? DateTime.UtcNow : null;
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(mark.Dead ? "Dead — click to undo" : "Alive — set automatically when killed");
+
             ImGui.PopID();
         }
 
         if (toRemove.HasValue) _detector.Remove(toRemove.Value);
 
         ImGui.Spacing();
-        ImGui.TextDisabled("Click a row to flag it. Drag rows to reorder.");
+        ImGui.TextDisabled("Click a mark to flag it. Drag the ≡ handle to reorder.");
     }
 
     private void DrawTrainTab()
