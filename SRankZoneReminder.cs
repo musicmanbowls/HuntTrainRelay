@@ -59,6 +59,12 @@ public sealed class SRankZoneReminder : IDisposable
         if (!_config.SRankZoneReminderEnabled) return;
         if (!ZoneToSRank.TryGetValue(territoryId, out var markName)) return;
 
+        // Only remind about marks the conductor has actually added to the watch
+        // list — otherwise this fires every time anyone passes through Elpis,
+        // Lakeland or Ultima Thule for any reason at all.
+        var watch = _config.Flags.FirstOrDefault(f => f.TerritoryId == territoryId);
+        if (watch == null) return;
+
         var now = DateTime.UtcNow;
         if (_lastFiredUtc.TryGetValue(territoryId, out var last) && now - last < Cooldown) return;
         _lastFiredUtc[territoryId] = now;
@@ -66,10 +72,7 @@ public sealed class SRankZoneReminder : IDisposable
         // If the conductor added a watch for this mark with a specific spawn
         // spot chosen, include it — and make it a clickable flag so they can
         // jump straight there rather than reading coordinates off the screen.
-        var watch = _config.Flags.FirstOrDefault(f =>
-            f.TerritoryId == territoryId && f.HasLocation);
-
-        if (watch != null)
+        if (watch.HasLocation)
         {
             var mapId = _detector.GetMapId(territoryId);
             if (mapId != 0)

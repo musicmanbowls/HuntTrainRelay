@@ -43,6 +43,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly TeleportHelper _teleport;
     private readonly IGameGui _gameGui;
     private readonly HuntCounter _counter;
+    private readonly IClientState _clientState;
+
+    private uint _clientTerritory => _clientState.TerritoryType;
 
     private readonly Configuration _config;
     private readonly HuntHelperIpc _ipc;
@@ -78,6 +81,7 @@ public sealed class Plugin : IDalamudPlugin
 
         _ipc = new HuntHelperIpc(_pluginInterface);
         _gameGui = gameGui;
+        _clientState = clientState;
         _huntTally = new HuntTallyIpc(_pluginInterface, _log);
         _detector = new MarkDetector(objectTable, clientState, dataManager);
         _teleport = new TeleportHelper(_pluginInterface, _log);
@@ -300,13 +304,14 @@ public sealed class Plugin : IDalamudPlugin
     /// Our own detected train list, with per-row teleport and map-flag actions.
     /// Drawn in both the Train tab and the standalone popout.
     /// </summary>
+    /// <summary>
+    /// The train list, in scouted order (or whatever order it's been dragged
+    /// into). Clicking a row flags it on the map; rows can be dragged up and
+    /// down to reorder, matching Hunt Helper's behaviour.
+    /// </summary>
     private void DrawTrainList()
     {
-        var marks = _detector.Marks.Values
-            .OrderBy(m => ExpansionData.Lookup(m.NameId)?.Order ?? int.MaxValue)
-            .ThenBy(m => ExpansionData.Lookup(m.NameId)?.ZoneOrder ?? int.MaxValue)
-            .ThenBy(m => m.Name)
-            .ToList();
+        var marks = _detector.Ordered();
 
         if (marks.Count == 0)
         {
@@ -316,8 +321,9 @@ public sealed class Plugin : IDalamudPlugin
 
         (uint, uint)? toRemove = null;
 
-        foreach (var mark in marks)
+        for (var i = 0; i < marks.Count; i++)
         {
+            var mark = marks[i];
             ImGui.PushID($"{mark.NameId}_{mark.Instance}");
 
             var info = ExpansionData.Lookup(mark.NameId);
@@ -332,23 +338,36 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             ImGui.SameLine();
-            if (mark.Dead)
-                ImGui.TextDisabled($"{zone} — {mark.Name}{glyph}");
-            else
-                ImGui.TextWrapped($"{zone} — {mark.Name}{glyph}");
+
+            // Selectable makes the whole row clickable (flag) and draggable.
+            var label = $"{zone} — {mark.Name}{glyph}";
+            if (mark.Dead) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
+            ImGui.Selectable(label, false, ImGuiSelectableFlags.None, new Vector2(230, 0));
+            if (mark.Dead) ImGui.PopStyleColor();
+
+            if (ImGui.IsItemClicked() && !ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+            {
+                if (!MapFlagHelper.FlagMark(_gameGui, mark))
+                    _lastPostResult = "Could not open the map for that mark.";
+            }
+
+            // Classic ImGui drag-to-reorder: while the row is held and the
+            // cursor has moved off it, swap with the neighbour in that direction.
+            if (ImGui.IsItemActive() && !ImGui.IsItemHovered())
+            {
+                var next = i + (ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y < 0f ? -1 : 1);
+                if (next >= 0 && next < marks.Count)
+                {
+                    _detector.Reorder(i, next);
+                    ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
+                }
+            }
 
             ImGui.SameLine();
             if (ImGui.SmallButton("tele"))
             {
                 if (!_teleport.TeleportToNearest(mark.TerritoryId, mark.MapPosition))
                     _lastPostResult = _teleport.LastError;
-            }
-
-            ImGui.SameLine();
-            if (ImGui.SmallButton("flag"))
-            {
-                if (!MapFlagHelper.FlagMark(_gameGui, mark))
-                    _lastPostResult = "Could not open the map for that mark.";
             }
 
             ImGui.SameLine();
@@ -361,6 +380,9 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         if (toRemove.HasValue) _detector.Remove(toRemove.Value);
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("Click a row to flag it. Drag rows to reorder.");
     }
 
     private void DrawTrainTab()
@@ -445,12 +467,25 @@ public sealed class Plugin : IDalamudPlugin
     }
 
 
-    private void DrawCounterList()
+    private void DrawCounterList(bool currentZoneOnly = false)
     {
-        foreach (var def in HuntCounter.Definitions)
+        var defs = HuntCounter.Definitions.AsEnumerable();
+        if (currentZoneOnly)
+        {
+            var here = _clientTerritory;
+            defs = defs.Where(d => d.TerritoryId == here);
+        }
+
+        if (currentZoneOnly && !defs.Any())
+        {
+            ImGui.TextDisabled("No counted S-rank in this zone.");
+            return;
+        }
+
+        foreach (var def in defs)
         {
             ImGui.PushID(def.MarkName);
-            ImGui.TextWrapped($"{def.MarkName} ({def.Expansion})");
+            ImGui.TextWrapped($"{def.MarkName} — {def.Zone}");
 
             foreach (var mob in def.MobNames)
             {
@@ -475,7 +510,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.SetNextWindowSize(new Vector2(300, 400), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Hunt Counter", ref _counterPopoutVisible))
         {
-            DrawCounterList();
+            DrawCounterList(currentZoneOnly: true);
         }
         ImGui.End();
     }
@@ -642,6 +677,14 @@ public sealed class Plugin : IDalamudPlugin
         );
         ImGui.Spacing();
 
+        ImGui.PushID("scouts");
+        DrawStringList(
+            _config.AdditionalScouts,
+            MaxAdditionalScouts,
+            "+ Add scout",
+            $"Maximum of {MaxAdditionalScouts} additional scouts reached.");
+        ImGui.PopID();
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
@@ -661,14 +704,6 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-
-        ImGui.PushID("scouts");
-        DrawStringList(
-            _config.AdditionalScouts,
-            MaxAdditionalScouts,
-            "+ Add scout",
-            $"Maximum of {MaxAdditionalScouts} additional scouts reached.");
-        ImGui.PopID();
     }
 
     private void DrawMarksSlainTab()

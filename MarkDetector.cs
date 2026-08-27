@@ -25,6 +25,13 @@ public class DetectedMark
     public DateTime FirstSeenUtc;
     public DateTime LastSeenUtc;
     public DateTime? DeathObservedAtUtc;
+
+    /// <summary>
+    /// Position in the train. Assigned incrementally as marks are first spotted,
+    /// so the default order is simply the order they were scouted — and it can
+    /// be rewritten freely by drag-and-drop reordering.
+    /// </summary>
+    public int Order;
 }
 
 /// <summary>
@@ -43,6 +50,7 @@ public sealed class MarkDetector
     private readonly IDataManager _dataManager;
 
     private readonly Dictionary<(uint NameId, uint Instance), DetectedMark> _marks = new();
+    private int _nextOrder;
 
     public IReadOnlyDictionary<(uint NameId, uint Instance), DetectedMark> Marks => _marks;
 
@@ -53,7 +61,35 @@ public sealed class MarkDetector
         _dataManager = dataManager;
     }
 
-    public void Clear() => _marks.Clear();
+    public void Clear()
+    {
+        _marks.Clear();
+        _nextOrder = 0;
+    }
+
+    /// <summary>
+    /// Marks in scouted order (or whatever order the conductor has dragged them
+    /// into), which is how the train list is always displayed.
+    /// </summary>
+    public List<DetectedMark> Ordered() => _marks.Values.OrderBy(m => m.Order).ToList();
+
+    /// <summary>
+    /// Moves the mark at one position in the ordered list to another, shuffling
+    /// the rest along. Used by drag-and-drop reordering.
+    /// </summary>
+    public void Reorder(int fromIndex, int toIndex)
+    {
+        var list = Ordered();
+        if (fromIndex < 0 || fromIndex >= list.Count) return;
+        if (toIndex < 0 || toIndex >= list.Count) return;
+
+        var moving = list[fromIndex];
+        list.RemoveAt(fromIndex);
+        list.Insert(toIndex, moving);
+
+        for (var i = 0; i < list.Count; i++) list[i].Order = i;
+        _nextOrder = list.Count;
+    }
 
     /// <summary>
     /// Folds an imported list into the current one. Existing entries win, so
@@ -67,6 +103,7 @@ public sealed class MarkDetector
         {
             var key = (mark.NameId, mark.Instance);
             if (_marks.ContainsKey(key)) continue;
+            mark.Order = _nextOrder++;
             _marks[key] = mark;
             added++;
         }
@@ -126,6 +163,7 @@ public sealed class MarkDetector
                 Dead = false,
                 FirstSeenUtc = now,
                 LastSeenUtc = now,
+                Order = _nextOrder++,
             };
         }
     }

@@ -17,6 +17,8 @@ public sealed class CounterDefinition
 {
     public string MarkName { get; init; } = string.Empty;
     public string Expansion { get; init; } = string.Empty;
+    public string Zone { get; init; } = string.Empty;
+    public uint TerritoryId { get; init; }
     public string[] MobNames { get; init; } = Array.Empty<string>();
 }
 
@@ -36,23 +38,25 @@ public sealed class HuntCounter : IDisposable
 
     public static readonly List<CounterDefinition> Definitions = new()
     {
-        new() { MarkName = "Ixtab", Expansion = "Shadowbringers",
+        new() { MarkName = "Ixtab", Expansion = "Shadowbringers", Zone = "The Rak'tika Greatwood", TerritoryId = 817,
                 MobNames = new[] { "Cracked Ronkan Doll", "Cracked Ronkan Thorn", "Cracked Ronkan Vessel" } },
-        new() { MarkName = "Forgiven Pedantry", Expansion = "Shadowbringers",
+        new() { MarkName = "Forgiven Pedantry", Expansion = "Shadowbringers", Zone = "Kholusia", TerritoryId = 814,
                 MobNames = new[] { "Dwarven Cotton Boll" } },
-        new() { MarkName = "Sphatika", Expansion = "Endwalker",
+        new() { MarkName = "Sphatika", Expansion = "Endwalker", Zone = "Thavnair", TerritoryId = 957,
                 MobNames = new[] { "Asvattha", "Pisaca", "Vajralangula" } },
-        new() { MarkName = "Ruminator", Expansion = "Endwalker",
+        new() { MarkName = "Ruminator", Expansion = "Endwalker", Zone = "Mare Lamentorum", TerritoryId = 959,
                 MobNames = new[] { "Thinker", "Wanderer", "Weeper" } },
-        new() { MarkName = "Okina", Expansion = "Stormblood",
+        new() { MarkName = "Okina", Expansion = "Stormblood", Zone = "The Ruby Sea", TerritoryId = 613,
                 MobNames = new[] { "Naked Yumemi", "Yumemi" } },
-        new() { MarkName = "Udumbara", Expansion = "Stormblood",
+        new() { MarkName = "Udumbara", Expansion = "Stormblood", Zone = "The Fringes", TerritoryId = 612,
                 MobNames = new[] { "Leshy", "Diakka" } },
-        new() { MarkName = "Salt and Light", Expansion = "Stormblood",
+        new() { MarkName = "Salt and Light", Expansion = "Stormblood", Zone = "The Lochs", TerritoryId = 621,
                 MobNames = new[] { "Throw" } },
-        new() { MarkName = "Leucrotta", Expansion = "Heavensward",
+        new() { MarkName = "Leucrotta", Expansion = "Heavensward", Zone = "Azys Lla", TerritoryId = 402,
                 MobNames = new[] { "Allagan Chimera", "Lesser Hydra", "Meracydian Vouivre" } },
-        new() { MarkName = "Minhocao", Expansion = "ARR",
+        new() { MarkName = "Squonk", Expansion = "Heavensward", Zone = "The Sea of Clouds", TerritoryId = 401,
+                MobNames = new[] { "Chirp" } },
+        new() { MarkName = "Minhocao", Expansion = "ARR", Zone = "Northern Thanalan", TerritoryId = 147,
                 MobNames = new[] { "Earth Sprite" } },
     };
 
