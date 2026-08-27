@@ -39,6 +39,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly Configuration _config;
     private readonly HuntHelperIpc _ipc;
+    private readonly HuntTallyIpc _huntTally;
     private readonly TrainWatcher _watcher;
 
     private bool _configWindowVisible;
@@ -63,7 +64,8 @@ public sealed class Plugin : IDalamudPlugin
         _config.Initialize(_pluginInterface);
 
         _ipc = new HuntHelperIpc(_pluginInterface);
-        _watcher = new TrainWatcher(framework, _ipc, _config);
+        _huntTally = new HuntTallyIpc(_pluginInterface, _log);
+        _watcher = new TrainWatcher(framework, _ipc, _huntTally, _config);
 
         _commandManager.AddHandler(ConfigCommand, new CommandInfo(OnCommand)
         {
@@ -241,6 +243,16 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.Spacing();
         ImGui.TextWrapped($"Status: {_watcher.LastStatus}");
+
+        ImGui.Spacing();
+        var autoMark = _config.AutoMarkDeadEnabled;
+        if (ImGui.Checkbox("Auto-mark dead using Hunt Tally", ref autoMark))
+        {
+            _config.AutoMarkDeadEnabled = autoMark;
+            _config.Save();
+        }
+        ImGui.TextDisabled(_huntTally.Status);
+        ImGui.TextDisabled("Marks are recorded dead here automatically, with Hunt Tally's exact kill time. Your Hunt Helper list still needs clicking yourself for its own navigation.");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -577,6 +589,7 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         _watcher.Dispose();
+        _huntTally.Dispose();
         _pluginInterface.UiBuilder.Draw -= DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi -= OnOpenConfigUi;
         _commandManager.RemoveHandler(ConfigCommand);

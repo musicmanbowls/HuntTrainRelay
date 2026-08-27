@@ -1,5 +1,6 @@
 using Dalamud.Plugin.Services;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -35,9 +36,18 @@ public class TrainWatcher : IDisposable
 {
     private readonly IFramework _framework;
     private readonly HuntHelperIpc _ipc;
+    private readonly HuntTallyIpc _huntTally;
     private readonly Configuration _config;
 
     private readonly Dictionary<(uint ModelId, uint Instance), TrackedMark> _tracked = new();
+
+    // Kills arrive on Hunt Tally's thread, not the framework thread, so they're
+    // queued here and applied during Poll rather than mutating _tracked directly.
+    private readonly ConcurrentQueue<HuntTallyKill> _pendingKills = new();
+
+    // Cheap insurance against double-fires, per Hunt Tally's own suggested key.
+    private readonly HashSet<(uint, uint, uint, long)> _seenKills = new();
+
     private double _secondsSinceLastPoll;
 
     public string LastStatus { get; private set; } = "Idle.";
@@ -52,17 +62,34 @@ public class TrainWatcher : IDisposable
     public Dictionary<(uint ModelId, uint Instance), TrackedMark> GetTrackedSnapshot() =>
         new(_tracked);
 
-    public TrainWatcher(IFramework framework, HuntHelperIpc ipc, Configuration config)
+    /// <summary>Number of marks auto-marked dead by Hunt Tally this train.</summary>
+    public int AutoMarkedCount { get; private set; }
+
+    public TrainWatcher(IFramework framework, HuntHelperIpc ipc, HuntTallyIpc huntTally, Configuration config)
     {
         _framework = framework;
         _ipc = ipc;
+        _huntTally = huntTally;
         _config = config;
+        _huntTally.KillReceived += OnHuntTallyKill;
         _framework.Update += OnUpdate;
     }
 
     public void Dispose()
     {
+        _huntTally.KillReceived -= OnHuntTallyKill;
         _framework.Update -= OnUpdate;
+    }
+
+    /// <summary>
+    /// Only queued while actively tracking — otherwise the queue would grow
+    /// unbounded across a long session of ordinary hunting.
+    /// </summary>
+    private void OnHuntTallyKill(HuntTallyKill kill)
+    {
+        if (!_config.TrackingEnabled) return;
+        if (!_config.AutoMarkDeadEnabled) return;
+        _pendingKills.Enqueue(kill);
     }
 
     private void OnUpdate(IFramework framework)
@@ -85,11 +112,16 @@ public class TrainWatcher : IDisposable
     public void ResetNow()
     {
         _tracked.Clear();
+        _seenKills.Clear();
+        AutoMarkedCount = 0;
+        while (_pendingKills.TryDequeue(out _)) { }
         LastStatus = "Train tracking reset — ready for a new train.";
     }
 
     private void Poll()
     {
+        _huntTally.EnsureConnected();
+
         var list = _ipc.TryGetTrainList();
         if (list == null)
         {
@@ -143,6 +175,8 @@ public class TrainWatcher : IDisposable
             }
         }
 
+        ApplyPendingKills();
+
         // Only drop marks that vanished from Hunt Helper's list while still alive
         // (unusual - safe to forget). Marks that vanished while already dead are
         // kept: that's exactly what happens when a conductor uses Hunt Helper's
@@ -155,6 +189,38 @@ public class TrainWatcher : IDisposable
         }
 
         var deadCount = _tracked.Values.Count(m => m.Dead);
-        LastStatus = $"Tracking {_tracked.Count} marks, {deadCount} dead.";
+        var autoPart = AutoMarkedCount > 0 ? $" ({AutoMarkedCount} auto)" : string.Empty;
+        LastStatus = $"Tracking {_tracked.Count} marks, {deadCount} dead{autoPart}.";
+    }
+
+    /// <summary>
+    /// Applies any kills Hunt Tally reported since the last poll. Matching is a
+    /// direct equality check on (nameId, instanceId): Hunt Helper records a mob
+    /// using mob.NameId as what its IPC calls MobID, and Hunt Tally publishes
+    /// that same BNpcName row id — so the two line up exactly, with no name
+    /// matching (which would break on non-English clients) and no ID mapping.
+    ///
+    /// Most events won't match anything, and that's expected: Hunt Tally reports
+    /// every mark you're credited with, whether or not it's part of a tracked
+    /// train. Unmatched kills are simply dropped.
+    ///
+    /// Note this marks the mark dead in OUR records only. Hunt Helper's IPC is
+    /// read-only, so the conductor's own Hunt Helper list still shows it alive
+    /// until they click it there themselves.
+    /// </summary>
+    private void ApplyPendingKills()
+    {
+        while (_pendingKills.TryDequeue(out var kill))
+        {
+            var dedupeKey = (kill.NameId, kill.TerritoryId, kill.InstanceId, kill.UnixSeconds);
+            if (!_seenKills.Add(dedupeKey)) continue;
+
+            if (!_tracked.TryGetValue((kill.NameId, kill.InstanceId), out var mark)) continue;
+            if (mark.Dead) continue;
+
+            mark.Dead = true;
+            mark.DeathObservedAtUtc = DateTimeOffset.FromUnixTimeSeconds(kill.UnixSeconds).UtcDateTime;
+            AutoMarkedCount++;
+        }
     }
 }

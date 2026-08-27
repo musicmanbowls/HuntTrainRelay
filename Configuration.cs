@@ -61,6 +61,14 @@ public class Configuration : IPluginConfiguration
     public int PollIntervalSeconds { get; set; } = 3;
 
     /// <summary>
+    /// When Hunt Tally (kihtli/HuntTally) is installed, automatically mark a
+    /// tracked mark dead the moment the game confirms you were credited with
+    /// the kill — with Hunt Tally's exact kill timestamp rather than our
+    /// poll-observed approximation. Has no effect if Hunt Tally isn't loaded.
+    /// </summary>
+    public bool AutoMarkDeadEnabled { get; set; } = true;
+
+    /// <summary>
     /// Extra names credited alongside the submitting character on a scouting
     /// report — e.g. a friend who scouted one expansion and sent you their
     /// Hunt Helper export code privately to fold into the combined report.
