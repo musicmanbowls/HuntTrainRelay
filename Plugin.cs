@@ -310,17 +310,21 @@ public sealed class Plugin : IDalamudPlugin
     /// Drawn in both the Train tab and the standalone popout.
     /// </summary>
     /// <summary>
-    /// The train list, in scouted order (or whatever order it's been dragged
-    /// into). Click a row to echo it to chat and flag it; click and drag to
-    /// move it.
+    /// The train list. This is a faithful port of Hunt Helper's own row layout
+    /// (HuntTrainUI.cs, img02/HuntHelper, MIT licensed), and the layout matters
+    /// as much as the logic:
     ///
-    /// The click/drag handling is a direct port of Hunt Helper's own
-    /// (HuntTrainUI.cs, img02/HuntHelper, MIT licensed), including its exact
-    /// drag-delta thresholds. The important part is that everything is gated on
-    /// ImGui.IsItemFocused(): only one row can hold focus, so at most one swap
-    /// can happen per frame. Earlier attempts here tracked the dragged row in a
-    /// field and reassigned it mid-loop, which let a single frame cascade swaps
-    /// all the way down the list.
+    /// The Selectable spans the FULL window width, with the buttons drawn on
+    /// top of it via SetItemAllowOverlap, and the whole row wrapped in a
+    /// BeginGroup/EndGroup so IsItemHovered/IsItemFocused refer to the entire
+    /// row. An earlier version used a narrow 230px Selectable with the buttons
+    /// beside it, which meant IsItemHovered went false whenever the cursor sat
+    /// to the right of it — so the drag branch fired every frame and the row
+    /// shot down the list. Dragging slowly made it worse, because the cursor
+    /// lingered in that dead zone.
+    ///
+    /// Drag handling is also gated on the cursor being left of the button
+    /// column, so grabbing near the buttons can't start a drag.
     /// </summary>
     private void DrawTrainList()
     {
@@ -334,7 +338,8 @@ public sealed class Plugin : IDalamudPlugin
 
         (uint, uint)? toRemove = null;
 
-        ImGui.Separator();
+        const float rowHeight = 22f;
+        const float buttonColumnX = 250f; // where the tele/x/dead column starts
 
         for (var i = 0; i < marks.Count; i++)
         {
@@ -344,28 +349,81 @@ public sealed class Plugin : IDalamudPlugin
             var info = ExpansionData.Lookup(mark.NameId);
             var zone = info?.Location ?? "?";
             var glyph = ExpansionData.InstanceGlyph(mark.Instance);
-            var label = $"「{zone}」  {mark.Name}{glyph}";
 
-            if (mark.Dead) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.45f, 0.45f, 0.45f, 1f));
-            ImGui.Selectable(label, false, ImGuiSelectableFlags.None, new Vector2(230, 0));
-            if (mark.Dead) ImGui.PopStyleColor();
+            ImGui.PushStyleColor(ImGuiCol.Text,
+                mark.Dead ? new Vector4(0.45f, 0.45f, 0.45f, 1f) : Vector4.One);
 
-            if (ImGui.IsItemFocused())
+            ImGui.SetCursorPosX(6);
+            ImGui.BeginGroup();
+
+            // Full-width selectable: this is the click target, the drag target,
+            // and what the row highlight follows.
+            ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, Vector2.Zero);
+            ImGui.Selectable($"「{zone}」", false, ImGuiSelectableFlags.None,
+                new Vector2(ImGui.GetWindowWidth(), rowHeight));
+            ImGui.SetItemAllowOverlap();
+            ImGui.PopStyleVar();
+
+            // Mark name, drawn over the selectable.
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(150);
+            ImGui.Text($"{mark.Name}{glyph}");
+            ImGui.SetItemAllowOverlap();
+
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(buttonColumnX);
+            if (ImGui.Button("tele", new Vector2(34f, rowHeight - 2)))
             {
-                // A release with essentially no movement is a click, not a drag.
+                if (!_teleport.TeleportToNearest(mark.TerritoryId, mark.MapPosition))
+                    _lastPostResult = _teleport.LastError;
+            }
+            ImGui.SetItemAllowOverlap();
+
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(buttonColumnX + 40);
+            if (ImGui.Button("x", new Vector2(20f, rowHeight - 2)))
+            {
+                toRemove = (mark.NameId, mark.Instance);
+            }
+            ImGui.SetItemAllowOverlap();
+
+            // Dead indicator — normally set automatically by Hunt Tally.
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(buttonColumnX + 68);
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 99);
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, Vector2.Zero);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 3);
+            var dead = mark.Dead;
+            ImGui.Checkbox("##dead", ref dead);
+            ImGui.PopStyleVar(2);
+            if (dead != mark.Dead)
+            {
+                mark.Dead = dead;
+                mark.DeathObservedAtUtc = dead ? DateTime.UtcNow : null;
+            }
+            ImGui.SetItemAllowOverlap();
+
+            ImGui.Separator();
+            ImGui.EndGroup();
+            ImGui.PopStyleColor();
+
+            // Everything below refers to the GROUP, i.e. the whole row.
+            var mouseXInWindow = ImGui.GetMousePos().X - ImGui.GetWindowPos().X;
+
+            if (ImGui.IsItemFocused() && mouseXInWindow < buttonColumnX)
+            {
+                // Release with essentially no movement = a click, not a drag.
                 if (ImGui.IsMouseReleased(ImGuiMouseButton.Left)
                     && Math.Abs(ImGui.GetMouseDragDelta().Y) < 0.1f)
                 {
                     TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
                 }
 
-                // Swap only once the cursor has left this row, one step at a time.
                 if (!ImGui.IsItemHovered())
                 {
                     var next = i;
-                    var dragY = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y;
-                    if (dragY < 0.3f) next -= 1;
-                    else if (dragY > 0f) next += 1;
+                    if (ImGui.GetMouseDragDelta(0, 0f).Y < 0.3f) next -= 1;
+                    else if (ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y > 0f) next += 1;
 
                     if (next >= 0 && next < marks.Count)
                     {
@@ -376,31 +434,6 @@ public sealed class Plugin : IDalamudPlugin
                 }
             }
 
-            ImGui.SameLine();
-            if (ImGui.SmallButton("tele"))
-            {
-                if (!_teleport.TeleportToNearest(mark.TerritoryId, mark.MapPosition))
-                    _lastPostResult = _teleport.LastError;
-            }
-
-            ImGui.SameLine();
-            if (ImGui.SmallButton("x"))
-            {
-                toRemove = (mark.NameId, mark.Instance);
-            }
-
-            // Dead indicator — normally set automatically by Hunt Tally, but
-            // clickable as a manual fallback.
-            ImGui.SameLine();
-            if (ImGui.RadioButton("##dead", mark.Dead))
-            {
-                mark.Dead = !mark.Dead;
-                mark.DeathObservedAtUtc = mark.Dead ? DateTime.UtcNow : null;
-            }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(mark.Dead ? "Dead — click to undo" : "Alive — set automatically when killed");
-
-            ImGui.Separator();
             ImGui.PopID();
         }
 
