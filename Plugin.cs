@@ -57,6 +57,14 @@ public sealed class Plugin : IDalamudPlugin
     private bool _counterPopoutVisible;
     private string _importCode = string.Empty;
     private int _draggingIndex = -1;
+
+    // Pixels of travel before a hold counts as a drag rather than a click.
+    private const float DragClickThreshold = 4f;
+
+    // Measured on the previous frame. The drag threshold has to match the real
+    // on-screen row pitch (selectable + buttons + separator), not just a line of
+    // text — using a smaller value makes each swap jump further than the cursor
+    // moved, so the row visibly outruns the mouse.
     private string _lastPostResult = string.Empty;
     private int _selectedNarrowRiftSpawn;
 
@@ -311,9 +319,16 @@ public sealed class Plugin : IDalamudPlugin
     /// by lines.
     ///
     /// A quick click echoes the mark to chat (with a clickable map link) and
-    /// opens the map. Click and hold, then move, to drag the row to a new
-    /// position — the row follows the cursor and the click is suppressed once
-    /// a drag starts, so the two never fire together.
+    /// opens the map. Click, hold and move to drag the row somewhere else.
+    ///
+    /// Reordering deliberately does NOT work off a pixel distance. An earlier
+    /// version swapped rows every time the cursor travelled one text-line, but
+    /// real rows are taller than that once separators and padding are counted,
+    /// so the list crept ahead of the pointer and the gap compounded. Instead a
+    /// swap happens only once the cursor has genuinely left the row being
+    /// dragged: after each swap the row lands back under the cursor, which
+    /// stops further swaps until the mouse actually moves on. That self-paces
+    /// regardless of row height, so it can never outrun the pointer.
     /// </summary>
     private void DrawTrainList()
     {
@@ -326,7 +341,6 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         (uint, uint)? toRemove = null;
-        var rowHeight = ImGui.GetTextLineHeightWithSpacing();
 
         ImGui.Separator();
 
@@ -342,24 +356,22 @@ public sealed class Plugin : IDalamudPlugin
 
             if (mark.Dead) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.45f, 0.45f, 0.45f, 1f));
 
-            // Full-width selectable: gives the hover/active highlight, and is
-            // both the click target and the drag handle.
-            ImGui.Selectable(label, _draggingIndex == i, ImGuiSelectableFlags.AllowDoubleClick,
-                new Vector2(230, 0));
+            ImGui.Selectable(label, _draggingIndex == i, ImGuiSelectableFlags.None, new Vector2(230, 0));
 
             if (mark.Dead) ImGui.PopStyleColor();
 
-            var itemActive = ImGui.IsItemActive();
-
-            if (itemActive)
+            if (ImGui.IsItemActive())
             {
                 var dragY = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y;
 
-                // Once the cursor has travelled a full row, treat it as a drag
-                // rather than a click and start moving the row.
-                if (Math.Abs(dragY) > rowHeight)
-                {
+                // A few pixels of travel is enough to call this a drag rather
+                // than a click. This only decides whether to suppress the click
+                // echo on release — it doesn't decide when to move anything.
+                if (Math.Abs(dragY) > DragClickThreshold)
                     _draggingIndex = i;
+
+                if (_draggingIndex == i && !ImGui.IsItemHovered())
+                {
                     var next = i + (dragY < 0f ? -1 : 1);
                     if (next >= 0 && next < marks.Count)
                     {
@@ -374,9 +386,8 @@ public sealed class Plugin : IDalamudPlugin
             if (ImGui.IsItemDeactivated())
             {
                 if (_draggingIndex == -1)
-                {
                     TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
-                }
+
                 _draggingIndex = -1;
             }
 
