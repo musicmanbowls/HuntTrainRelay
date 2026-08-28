@@ -95,6 +95,24 @@ public class Configuration : IPluginConfiguration
     /// </summary>
     public bool ScanningPaused { get; set; } = false;
 
+    /// <summary>Echo a mark to chat when its row is clicked in the train list.</summary>
+    public bool EchoOnMarkClick { get; set; } = true;
+
+    /// <summary>Echo to chat each time a new A-rank is picked up while scouting.</summary>
+    public bool EchoOnDetection { get; set; } = false;
+
+    /// <summary>Teleporting to a mark also drops the map flag on it.</summary>
+    public bool TeleportAlsoFlags { get; set; } = true;
+
+    /// <summary>Drop the zone column in the train popout to keep it narrow.</summary>
+    public bool HideZonesInPopout { get; set; } = false;
+
+    /// <summary>Show how long ago each mark was last seen, on its row.</summary>
+    public bool ShowMarkAge { get; set; } = true;
+
+    /// <summary>Height of a train list row, in pixels.</summary>
+    public int TrainRowHeight { get; set; } = 22;
+
     public bool SRankZoneReminderEnabled { get; set; } = true;
 
     /// <summary>

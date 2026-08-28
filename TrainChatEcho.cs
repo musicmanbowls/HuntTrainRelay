@@ -15,6 +15,13 @@ namespace HuntTrainRelay;
 /// </summary>
 public static class TrainChatEcho
 {
+    // Palette indices taken from Hunt Helper's own HuntManager (MIT licensed):
+    // 12 = pinkish red (what they use for A-ranks), 506 = gold, 16 = dark red,
+    // 34 = blue, 64 = white.
+    public const ushort ARankColour = 12;
+    public const ushort GoldColour = 506;
+    public const ushort RedColour = 16;
+
     private const ushort TextColour = 24;
     private const ushort FlagColour = 559;
     private const ushort CountColour = 502;
@@ -43,5 +50,28 @@ public static class TrainChatEcho
         chatGui.Print(sb.BuiltString);
 
         if (openMap) gameGui.OpenMapWithMapLink(mapLink);
+    }
+
+    /// <summary>
+    /// A short coloured line when a new A-rank is picked up while scouting, so
+    /// a scout working with the window closed still gets confirmation.
+    /// </summary>
+    public static void SendDetected(IChatGui chatGui, DetectedMark mark)
+    {
+        var info = ExpansionData.Lookup(mark.NameId);
+        var zone = info?.Location ?? "?";
+        var glyph = ExpansionData.InstanceGlyph(mark.Instance);
+
+        var sb = new SeStringBuilder();
+        sb.AddUiForeground(ARankColour);
+        sb.AddIcon(BitmapFontIcon.ExclamationRectangle);
+        sb.AddText($"{mark.Name}{glyph}");
+        sb.AddUiForegroundOff();
+
+        sb.AddUiForeground(GoldColour);
+        sb.AddText($" found in {zone}");
+        sb.AddUiForegroundOff();
+
+        chatGui.Print(sb.BuiltString);
     }
 }

@@ -52,6 +52,9 @@ public sealed class MarkDetector
     private readonly Dictionary<(uint NameId, uint Instance), DetectedMark> _marks = new();
     private int _nextOrder;
 
+    /// <summary>Raised once when a mark is first picked up by scanning.</summary>
+    public event Action<DetectedMark>? MarkDetected;
+
     public IReadOnlyDictionary<(uint NameId, uint Instance), DetectedMark> Marks => _marks;
 
     public MarkDetector(IObjectTable objectTable, IClientState clientState, IDataManager dataManager)
@@ -166,6 +169,8 @@ public sealed class MarkDetector
                 LastSeenUtc = now,
                 Order = _nextOrder++,
             };
+
+            MarkDetected?.Invoke(_marks[key]);
         }
     }
 

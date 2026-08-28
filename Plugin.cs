@@ -99,6 +99,7 @@ public sealed class Plugin : IDalamudPlugin
         _watcher = new TrainWatcher(framework, _ipc, _huntTally, _detector, _config);
         _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config, _detector);
         _counter = new HuntCounter(chatGui);
+        _detector.MarkDetected += OnMarkDetected;
 
         _commandManager.AddHandler(ConfigCommand, new CommandInfo(OnCommand)
         {
@@ -122,6 +123,21 @@ public sealed class Plugin : IDalamudPlugin
     private void OnCommand(string command, string args) => _configWindowVisible = true;
 
     private void OnTrainCommand(string command, string args) => _trainPopoutVisible = true;
+
+    private void OnMarkDetected(DetectedMark mark)
+    {
+        if (_config.EchoOnDetection)
+            TrainChatEcho.SendDetected(_chatGui, mark);
+    }
+
+    /// <summary>Compact "how long ago was this last seen" label, e.g. 5m / 1h 12m.</summary>
+    private static string FormatAge(DateTime lastSeenUtc)
+    {
+        var age = DateTime.UtcNow - lastSeenUtc;
+        if (age.TotalMinutes < 1) return "just now";
+        if (age.TotalHours < 1) return $"{(int)age.TotalMinutes}m";
+        return $"{(int)age.TotalHours}h {age.Minutes}m";
+    }
 
     private void OnCounterCommand(string command, string args) => _counterPopoutVisible = true;
 
@@ -366,7 +382,7 @@ public sealed class Plugin : IDalamudPlugin
     /// payload; behaviour is the same, and it keeps to API already proven to
     /// compile in this project.
     /// </summary>
-    private void DrawTrainList()
+    private void DrawTrainList(bool showZones = true)
     {
         var marks = _detector.Ordered();
 
@@ -378,7 +394,7 @@ public sealed class Plugin : IDalamudPlugin
 
         (uint, uint)? toRemove = null;
 
-        const float rowHeight = 22f;
+        var rowHeight = (float)Math.Clamp(_config.TrainRowHeight, 14, 48);
         const float leftPad = 6f;
         const float columnGap = 14f;
 
@@ -389,11 +405,19 @@ public sealed class Plugin : IDalamudPlugin
         var nameColWidth = 0f;
         foreach (var m in marks)
         {
-            var z = ExpansionData.Lookup(m.NameId)?.Location ?? "?";
-            zoneColWidth = Math.Max(zoneColWidth, ImGui.CalcTextSize($"「{z}」").X);
+            if (showZones)
+            {
+                var z = ExpansionData.Lookup(m.NameId)?.Location ?? "?";
+                zoneColWidth = Math.Max(zoneColWidth, ImGui.CalcTextSize($"「{z}」").X);
+            }
             nameColWidth = Math.Max(nameColWidth,
                 ImGui.CalcTextSize($"{m.Name}{ExpansionData.InstanceGlyph(m.Instance)}").X);
         }
+
+        // Room for the age label, sized off a worst case so it doesn't jitter
+        // as the numbers tick over.
+        if (_config.ShowMarkAge)
+            nameColWidth += ImGui.CalcTextSize("  (00h 00m)").X;
 
         var nameColumnX = leftPad + zoneColWidth + columnGap;
         var buttonColumnX = nameColumnX + nameColWidth + columnGap;
@@ -418,14 +442,15 @@ public sealed class Plugin : IDalamudPlugin
 
             ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, Vector2.Zero);
             // Highlighted while it's the row being dragged.
-            ImGui.Selectable($"「{zone}」", _dragFromIndex == i, ImGuiSelectableFlags.None,
+            ImGui.Selectable(showZones ? $"「{zone}」" : string.Empty, _dragFromIndex == i, ImGuiSelectableFlags.None,
                 new Vector2(ImGui.GetWindowWidth(), rowHeight));
             ImGui.SetItemAllowOverlap();
             ImGui.PopStyleVar();
 
             ImGui.SameLine();
             ImGui.SetCursorPosX(nameColumnX);
-            ImGui.Text($"{mark.Name}{glyph}");
+            var ageSuffix = _config.ShowMarkAge ? $"  ({FormatAge(mark.LastSeenUtc)})" : string.Empty;
+            ImGui.Text($"{mark.Name}{glyph}{ageSuffix}");
             ImGui.SetItemAllowOverlap();
 
             ImGui.SameLine();
@@ -434,6 +459,8 @@ public sealed class Plugin : IDalamudPlugin
             {
                 if (!_teleport.TeleportToNearest(mark.TerritoryId, mark.MapPosition))
                     _lastPostResult = _teleport.LastError;
+                else if (_config.TeleportAlsoFlags)
+                    MapFlagHelper.FlagMark(_gameGui, mark);
             }
             ImGui.SetItemAllowOverlap();
 
@@ -499,7 +526,10 @@ public sealed class Plugin : IDalamudPlugin
                 && ImGui.IsMouseReleased(ImGuiMouseButton.Left)
                 && Math.Abs(ImGui.GetMouseDragDelta().Y) < 0.1f)
             {
-                TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
+                if (_config.EchoOnMarkClick)
+                    TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
+                else
+                    MapFlagHelper.FlagMark(_gameGui, mark);
             }
 
             ImGui.PopID();
@@ -577,7 +607,7 @@ public sealed class Plugin : IDalamudPlugin
             }
             else
             {
-                ImGui.SetClipboardText(TrainExchange.Export(_detector.Marks.Values));
+                ImGui.SetClipboardText(TrainExchange.Export(_detector.Ordered()));
                 _lastPostResult = $"Exported {_detector.Marks.Count} marks to clipboard.";
             }
         }
@@ -619,7 +649,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             DrawTrainControls();
             ImGui.Spacing();
-            DrawTrainList();
+            DrawTrainList(showZones: !_config.HideZonesInPopout);
         }
         ImGui.End();
     }
@@ -954,6 +984,59 @@ public sealed class Plugin : IDalamudPlugin
             _config.PollIntervalSeconds = Math.Clamp(pollInterval, 1, 30);
             _config.Save();
         }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextWrapped("Train list");
+        ImGui.Spacing();
+
+        var echoClick = _config.EchoOnMarkClick;
+        if (ImGui.Checkbox("Echo a mark to chat when its row is clicked", ref echoClick))
+        {
+            _config.EchoOnMarkClick = echoClick;
+            _config.Save();
+        }
+        ImGui.TextDisabled("Off still flags the mark on your map — it just doesn't post the chat line. S-rank reminders are unaffected.");
+
+        var echoDetect = _config.EchoOnDetection;
+        if (ImGui.Checkbox("Echo each new mark as it's detected", ref echoDetect))
+        {
+            _config.EchoOnDetection = echoDetect;
+            _config.Save();
+        }
+        ImGui.TextDisabled("Useful while scouting with the window closed.");
+
+        var teleFlags = _config.TeleportAlsoFlags;
+        if (ImGui.Checkbox("Teleport also drops the map flag", ref teleFlags))
+        {
+            _config.TeleportAlsoFlags = teleFlags;
+            _config.Save();
+        }
+
+        var showAge = _config.ShowMarkAge;
+        if (ImGui.Checkbox("Show how long ago each mark was last seen", ref showAge))
+        {
+            _config.ShowMarkAge = showAge;
+            _config.Save();
+        }
+        ImGui.TextDisabled("Updates in place when you fly past a mark again — it won't move in the list.");
+
+        var hideZones = _config.HideZonesInPopout;
+        if (ImGui.Checkbox("Hide zone names in the train popout", ref hideZones))
+        {
+            _config.HideZonesInPopout = hideZones;
+            _config.Save();
+        }
+        ImGui.TextDisabled("Keeps the popout narrow. The Train tab always shows them.");
+
+        var rowH = _config.TrainRowHeight;
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.InputInt("Row height (pixels)", ref rowH))
+        {
+            _config.TrainRowHeight = Math.Clamp(rowH, 14, 48);
+            _config.Save();
+        }
     }
 
     private void DrawWebhookList()
@@ -1085,6 +1168,7 @@ public sealed class Plugin : IDalamudPlugin
         _huntTally.Dispose();
         _zoneReminder.Dispose();
         _counter.Dispose();
+        _detector.MarkDetected -= OnMarkDetected;
         _pluginInterface.UiBuilder.Draw -= DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi -= OnOpenConfigUi;
         _commandManager.RemoveHandler(ConfigCommand);

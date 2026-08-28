@@ -2,7 +2,7 @@
   "Author": "MusicManBowls",
   "Name": "Hunt Train Relay",
   "InternalName": "HuntTrainRelay",
-  "AssemblyVersion": "1.9.0.0",
+  "AssemblyVersion": "1.9.1.0",
   "Description": "Watches Hunt Helper's train via its IPC. Ends manually via End Train Now, posting a Discord report sorted by the order marks actually died, with Assumed Sniped detection for named marks never seen. Also supports on-demand scouting reports with multi-scout credit.",
   "ApplicableVersion": "any",
   "RepoUrl": "https://github.com/MusicManBowls/HuntTrainRelay",

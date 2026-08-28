@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v10.0": {
-      "HuntTrainRelay/1.9.0.0": {
+      "HuntTrainRelay/1.9.1.0": {
         "runtime": {
           "HuntTrainRelay.dll": {}
         }
@@ -14,7 +14,7 @@
     }
   },
   "libraries": {
-    "HuntTrainRelay/1.9.0.0": {
+    "HuntTrainRelay/1.9.1.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

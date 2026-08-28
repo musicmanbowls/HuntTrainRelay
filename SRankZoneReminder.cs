@@ -78,24 +78,56 @@ public sealed class SRankZoneReminder : IDisposable
             if (mapId != 0)
             {
                 var link = SeString.CreateMapLink(territoryId, mapId, watch.X, watch.Y);
-                var msg = new SeStringBuilder()
-                    .AddText($"[Hunt Train Relay] REMINDER TO CHECK {markName.ToUpperInvariant()} — ")
-                    .Append(link)
-                    .Build();
-                _chatGui.Print(msg);
+                var sb = new SeStringBuilder();
+                sb.AddUiForeground(TrainChatEcho.GoldColour);
+                sb.AddText("REMINDER TO CHECK ");
+                sb.AddUiForegroundOff();
+                sb.AddUiForeground(TrainChatEcho.ARankColour);
+                sb.AddText(markName.ToUpperInvariant());
+                sb.AddUiForegroundOff();
+                sb.AddUiForeground(TrainChatEcho.GoldColour);
+                sb.AddText(" — ");
+                sb.AddUiForegroundOff();
+                sb.Append(link);
+                _chatGui.Print(sb.BuiltString);
             }
             else
             {
-                _chatGui.Print($"[Hunt Train Relay] REMINDER TO CHECK {markName.ToUpperInvariant()} ({watch.X:F1}, {watch.Y:F1})");
+                _chatGui.Print(BuildReminder(markName, $" ({watch.X:F1}, {watch.Y:F1})"));
             }
         }
         else
         {
-            _chatGui.Print($"[Hunt Train Relay] REMINDER TO CHECK {markName.ToUpperInvariant()}");
+            _chatGui.Print(BuildReminder(markName, null));
         }
 
         if (_config.SRankZoneReminderSound)
             PlayReminderSound();
+    }
+
+    /// <summary>
+    /// "REMINDER TO CHECK" in gold with the mark name in red, so it stands out
+    /// in a busy echo log. Colour indices come from Hunt Helper's own palette.
+    /// </summary>
+    private static SeString BuildReminder(string markName, string? suffix)
+    {
+        var sb = new SeStringBuilder();
+        sb.AddUiForeground(TrainChatEcho.GoldColour);
+        sb.AddText("REMINDER TO CHECK ");
+        sb.AddUiForegroundOff();
+
+        sb.AddUiForeground(TrainChatEcho.ARankColour);
+        sb.AddText(markName.ToUpperInvariant());
+        sb.AddUiForegroundOff();
+
+        if (!string.IsNullOrEmpty(suffix))
+        {
+            sb.AddUiForeground(TrainChatEcho.GoldColour);
+            sb.AddText(suffix);
+            sb.AddUiForegroundOff();
+        }
+
+        return sb.BuiltString;
     }
 
     /// <summary>
