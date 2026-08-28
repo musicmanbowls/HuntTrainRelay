@@ -149,10 +149,17 @@ public class TrainWatcher : IDisposable
             LastStatus = $"Own detection error: {ex.Message}";
         }
 
+        // Apply Hunt Tally kills BEFORE anything that depends on Hunt Helper.
+        // This used to sit further down and was skipped entirely whenever Hunt
+        // Helper wasn't loaded or its list was empty — which is the normal case
+        // once a conductor is working from our own detected list, so kills piled
+        // up in the queue and marks never went dead.
+        ApplyPendingKills();
+
         var list = _ipc.TryGetTrainList();
         if (list == null)
         {
-            LastStatus = "Waiting for Hunt Helper (not loaded, or no version match)...";
+            LastStatus = $"Hunt Helper not detected. Own: {OwnSummary()}";
             return;
         }
 
@@ -166,8 +173,8 @@ public class TrainWatcher : IDisposable
             // via an explicit Reset or a successful End Train Now.
             var deadCountEmpty = _tracked.Values.Count(m => m.Dead);
             LastStatus = _tracked.Count > 0
-                ? $"Tracking {_tracked.Count} marks, {deadCountEmpty} dead. (Hunt Helper's list is currently empty.)"
-                : "No active train recorded in Hunt Helper.";
+                ? $"Hunt Helper list empty (retaining {_tracked.Count}, {deadCountEmpty} dead). Own: {OwnSummary()}"
+                : $"Hunt Helper has no active train. Own: {OwnSummary()}";
             return;
         }
 
@@ -202,8 +209,6 @@ public class TrainWatcher : IDisposable
             }
         }
 
-        ApplyPendingKills();
-
         // Only drop marks that vanished from Hunt Helper's list while still alive
         // (unusual - safe to forget). Marks that vanished while already dead are
         // kept: that's exactly what happens when a conductor uses Hunt Helper's
@@ -237,6 +242,14 @@ public class TrainWatcher : IDisposable
     /// read-only, so the conductor's own Hunt Helper list still shows it alive
     /// until they click it there themselves.
     /// </summary>
+    private string OwnSummary()
+    {
+        var total = _detector.Marks.Count;
+        var dead = _detector.Marks.Values.Count(m => m.Dead);
+        var autoPart = AutoMarkedCount > 0 ? $", {AutoMarkedCount} auto" : string.Empty;
+        return $"{total} marks, {dead} dead{autoPart}";
+    }
+
     private void ApplyPendingKills()
     {
         while (_pendingKills.TryDequeue(out var kill))
