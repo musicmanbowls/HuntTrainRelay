@@ -57,6 +57,10 @@ public sealed class Plugin : IDalamudPlugin
     private bool _counterPopoutVisible;
     private string _importCode = string.Empty;
 
+    // Drag state for the train list. Both are -1 when no drag is in progress.
+    private int _dragFromIndex = -1;
+    private int _dragToIndex = -1;
+
     // Measured on the previous frame. The drag threshold has to match the real
     // on-screen row pitch (selectable + buttons + separator), not just a line of
     // text — using a smaller value makes each swap jump further than the cursor
@@ -256,7 +260,8 @@ public sealed class Plugin : IDalamudPlugin
 
         if (!_configWindowVisible) return;
 
-        ImGui.SetNextWindowSize(new Vector2(460, 480), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(620, 560), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Vector2(420, 240), new Vector2(float.MaxValue, float.MaxValue));
         if (ImGui.Begin("Hunt Train Relay", ref _configWindowVisible))
         {
             if (ImGui.BeginTabBar("HuntTrainRelayTabs"))
@@ -310,21 +315,18 @@ public sealed class Plugin : IDalamudPlugin
     /// Drawn in both the Train tab and the standalone popout.
     /// </summary>
     /// <summary>
-    /// The train list. This is a faithful port of Hunt Helper's own row layout
-    /// (HuntTrainUI.cs, img02/HuntHelper, MIT licensed), and the layout matters
-    /// as much as the logic:
+    /// The train list, with drag-to-reorder.
     ///
-    /// The Selectable spans the FULL window width, with the buttons drawn on
-    /// top of it via SetItemAllowOverlap, and the whole row wrapped in a
-    /// BeginGroup/EndGroup so IsItemHovered/IsItemFocused refer to the entire
-    /// row. An earlier version used a narrow 230px Selectable with the buttons
-    /// beside it, which meant IsItemHovered went false whenever the cursor sat
-    /// to the right of it — so the drag branch fired every frame and the row
-    /// shot down the list. Dragging slowly made it worse, because the cursor
-    /// lingered in that dead zone.
+    /// The important property here: NOTHING is reordered while the drag is in
+    /// progress. Hovering a row only records where the drop would land, and the
+    /// list is mutated exactly once, after the loop, when the mouse is
+    /// released. Earlier versions swapped rows on every frame the cursor was
+    /// off the source row, which made the dragged row race down the list and
+    /// snap back — worse the slower you moved.
     ///
-    /// Drag handling is also gated on the cursor being left of the button
-    /// column, so grabbing near the buttons can't start a drag.
+    /// The source index is tracked in a field rather than through an ImGui drag
+    /// payload; behaviour is the same, and it keeps to API already proven to
+    /// compile in this project.
     /// </summary>
     private void DrawTrainList()
     {
@@ -339,7 +341,27 @@ public sealed class Plugin : IDalamudPlugin
         (uint, uint)? toRemove = null;
 
         const float rowHeight = 22f;
-        const float buttonColumnX = 250f; // where the tele/x/dead column starts
+        const float leftPad = 6f;
+        const float columnGap = 14f;
+
+        // Size the columns to the widest text actually present, so long zone
+        // names (Coerthas Western Highlands) and long marks (Sabotender
+        // Bailarina, Yehehetoaua'pyo) can never run into the buttons.
+        var zoneColWidth = 0f;
+        var nameColWidth = 0f;
+        foreach (var m in marks)
+        {
+            var z = ExpansionData.Lookup(m.NameId)?.Location ?? "?";
+            zoneColWidth = Math.Max(zoneColWidth, ImGui.CalcTextSize($"「{z}」").X);
+            nameColWidth = Math.Max(nameColWidth,
+                ImGui.CalcTextSize($"{m.Name}{ExpansionData.InstanceGlyph(m.Instance)}").X);
+        }
+
+        var nameColumnX = leftPad + zoneColWidth + columnGap;
+        var buttonColumnX = nameColumnX + nameColWidth + columnGap;
+
+        var mouseXInWindow = ImGui.GetMousePos().X - ImGui.GetWindowPos().X;
+        var dragging = _dragFromIndex != -1;
 
         for (var i = 0; i < marks.Count; i++)
         {
@@ -353,20 +375,18 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.PushStyleColor(ImGuiCol.Text,
                 mark.Dead ? new Vector4(0.45f, 0.45f, 0.45f, 1f) : Vector4.One);
 
-            ImGui.SetCursorPosX(6);
+            ImGui.SetCursorPosX(leftPad);
             ImGui.BeginGroup();
 
-            // Full-width selectable: this is the click target, the drag target,
-            // and what the row highlight follows.
             ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, Vector2.Zero);
-            ImGui.Selectable($"「{zone}」", false, ImGuiSelectableFlags.None,
+            // Highlighted while it's the row being dragged.
+            ImGui.Selectable($"「{zone}」", _dragFromIndex == i, ImGuiSelectableFlags.None,
                 new Vector2(ImGui.GetWindowWidth(), rowHeight));
             ImGui.SetItemAllowOverlap();
             ImGui.PopStyleVar();
 
-            // Mark name, drawn over the selectable.
             ImGui.SameLine();
-            ImGui.SetCursorPosX(150);
+            ImGui.SetCursorPosX(nameColumnX);
             ImGui.Text($"{mark.Name}{glyph}");
             ImGui.SetItemAllowOverlap();
 
@@ -387,7 +407,6 @@ public sealed class Plugin : IDalamudPlugin
             }
             ImGui.SetItemAllowOverlap();
 
-            // Dead indicator — normally set automatically by Hunt Tally.
             ImGui.SameLine();
             ImGui.SetCursorPosX(buttonColumnX + 68);
             ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 99);
@@ -407,40 +426,55 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.EndGroup();
             ImGui.PopStyleColor();
 
-            // Everything below refers to the GROUP, i.e. the whole row.
-            var mouseXInWindow = ImGui.GetMousePos().X - ImGui.GetWindowPos().X;
-
-            if (ImGui.IsItemFocused() && mouseXInWindow < buttonColumnX)
+            // --- drag: only ever RECORDS intent, never mutates the list ---
+            if (_dragFromIndex == -1
+                && ImGui.IsItemActive()
+                && ImGui.IsMouseDragging(ImGuiMouseButton.Left)
+                && mouseXInWindow < buttonColumnX)
             {
-                // Release with essentially no movement = a click, not a drag.
-                if (ImGui.IsMouseReleased(ImGuiMouseButton.Left)
-                    && Math.Abs(ImGui.GetMouseDragDelta().Y) < 0.1f)
-                {
-                    TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
-                }
+                _dragFromIndex = i;
+            }
 
-                if (!ImGui.IsItemHovered())
-                {
-                    var next = i;
-                    if (ImGui.GetMouseDragDelta(0, 0f).Y < 0.3f) next -= 1;
-                    else if (ImGui.GetMouseDragDelta(ImGuiMouseButton.Left).Y > 0f) next += 1;
+            if (dragging && ImGui.IsItemHovered())
+            {
+                _dragToIndex = i;
+            }
 
-                    if (next >= 0 && next < marks.Count)
-                    {
-                        (marks[i], marks[next]) = (marks[next], marks[i]);
-                        _detector.ApplyOrder(marks);
-                        ImGui.ResetMouseDragDelta();
-                    }
-                }
+            // --- click: a release with no drag in progress ---
+            if (!dragging
+                && ImGui.IsItemFocused()
+                && mouseXInWindow < buttonColumnX
+                && ImGui.IsMouseReleased(ImGuiMouseButton.Left)
+                && Math.Abs(ImGui.GetMouseDragDelta().Y) < 0.1f)
+            {
+                TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
             }
 
             ImGui.PopID();
         }
 
+        // --- commit the move exactly once, on release, after the loop ---
+        if (_dragFromIndex != -1 && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+        {
+            if (_dragToIndex != -1
+                && _dragToIndex != _dragFromIndex
+                && _dragFromIndex < marks.Count
+                && _dragToIndex < marks.Count)
+            {
+                var moving = marks[_dragFromIndex];
+                marks.RemoveAt(_dragFromIndex);
+                marks.Insert(_dragToIndex, moving);
+                _detector.ApplyOrder(marks);
+            }
+
+            _dragFromIndex = -1;
+            _dragToIndex = -1;
+        }
+
         if (toRemove.HasValue) _detector.Remove(toRemove.Value);
 
         ImGui.Spacing();
-        ImGui.TextDisabled("Click a mark to echo + flag it. Click and drag to move it in the list.");
+        ImGui.TextDisabled("Click a mark to echo + flag it. Drag a row and release where you want it.");
     }
 
     private void DrawTrainTab()
@@ -516,7 +550,8 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (!_trainPopoutVisible) return;
 
-        ImGui.SetNextWindowSize(new Vector2(360, 320), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(600, 420), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Vector2(420, 200), new Vector2(float.MaxValue, float.MaxValue));
         if (ImGui.Begin("Hunt Train", ref _trainPopoutVisible))
         {
             DrawTrainList();
