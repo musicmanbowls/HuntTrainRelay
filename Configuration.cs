@@ -110,6 +110,16 @@ public class Configuration : IPluginConfiguration
     /// <summary>Show how long ago each mark was last seen, on its row.</summary>
     public bool ShowMarkAge { get; set; } = true;
 
+    /// <summary>
+    /// When the current mark dies, move the pointer to the next live mark
+    /// automatically — so a conductor can work through a train without
+    /// touching the list.
+    /// </summary>
+    public bool AutoAdvance { get; set; } = true;
+
+    /// <summary>Echo (and flag) the new current mark when the pointer advances.</summary>
+    public bool EchoOnAdvance { get; set; } = true;
+
     /// <summary>Height of a train list row, in pixels.</summary>
     public int TrainRowHeight { get; set; } = 22;
 

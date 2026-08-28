@@ -19,6 +19,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string ConfigCommand = "/htr";
     private const string TrainCommand = "/htrt";
     private const string CounterCommand = "/htrc";
+    private const string NextAetheryteCommand = "/htra";
     private const int MaxWebhooks = 5;
     private const int MaxAdditionalScouts = 3;
 
@@ -62,6 +63,11 @@ public sealed class Plugin : IDalamudPlugin
     // Drag state for the train list. Both are -1 when no drag is in progress.
     private int _dragFromIndex = -1;
     private int _dragToIndex = -1;
+
+    // The mark the conductor is currently on. Tracked by identity rather than
+    // list position, so dragging rows or removing marks can't silently change
+    // what "current" points at.
+    private (uint NameId, uint Instance)? _currentMark;
 
     // Measured on the previous frame. The drag threshold has to match the real
     // on-screen row pitch (selectable + buttons + separator), not just a line of
@@ -114,6 +120,11 @@ public sealed class Plugin : IDalamudPlugin
         _commandManager.AddHandler(CounterCommand, new CommandInfo(OnCounterCommand)
         {
             HelpMessage = "Open the Hunt Train Relay mob counter popout.",
+        });
+
+        _commandManager.AddHandler(NextAetheryteCommand, new CommandInfo(OnNextAetheryteCommand)
+        {
+            HelpMessage = "Name the closest aetheryte to the next mark in the train.",
         });
 
         _pluginInterface.UiBuilder.Draw += DrawUI;
@@ -273,6 +284,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawUI()
     {
+        UpdateAutoAdvance();
         DrawTrainPopout();
         DrawCounterPopout();
 
@@ -332,6 +344,113 @@ public sealed class Plugin : IDalamudPlugin
     /// Our own detected train list, with per-row teleport and map-flag actions.
     /// Drawn in both the Train tab and the standalone popout.
     /// </summary>
+
+    /// <summary>The mark the pointer is on, or null if it's been cleared/removed.</summary>
+    private DetectedMark? CurrentMark()
+    {
+        if (_currentMark is not { } key) return null;
+        return _detector.Marks.TryGetValue(key, out var mark) ? mark : null;
+    }
+
+    /// <summary>
+    /// The next live (not dead) mark after the current one, in list order.
+    /// Falls back to the first live mark when there's no pointer yet.
+    /// </summary>
+    private DetectedMark? NextLiveMark()
+    {
+        var ordered = _detector.Ordered();
+        if (ordered.Count == 0) return null;
+
+        var startIndex = 0;
+        if (_currentMark is { } key)
+        {
+            var idx = ordered.FindIndex(m => m.NameId == key.NameId && m.Instance == key.Instance);
+            if (idx >= 0) startIndex = idx + 1;
+        }
+
+        for (var i = startIndex; i < ordered.Count; i++)
+            if (!ordered[i].Dead) return ordered[i];
+
+        return null;
+    }
+
+    /// <summary>
+    /// Moves the pointer to a mark, optionally announcing it. Announcing echoes
+    /// to chat and drops the map flag, which is what makes hands-free
+    /// conducting work: kill a mark, the next one is already flagged.
+    /// </summary>
+    private void SetCurrentMark(DetectedMark? mark, bool announce)
+    {
+        if (mark == null)
+        {
+            _currentMark = null;
+            return;
+        }
+
+        _currentMark = (mark.NameId, mark.Instance);
+
+        if (!announce) return;
+
+        var ordered = _detector.Ordered();
+        var index = ordered.FindIndex(m => m.NameId == mark.NameId && m.Instance == mark.Instance);
+        TrainChatEcho.Send(_chatGui, _gameGui, mark, index < 0 ? 0 : index, ordered.Count);
+    }
+
+    /// <summary>
+    /// Advances the pointer when the mark it's on has died — whether that was
+    /// a manual tick or Hunt Tally doing it automatically. Runs from the draw
+    /// loop so it catches both without either path needing to know about it.
+    /// </summary>
+    private void UpdateAutoAdvance()
+    {
+        if (!_config.AutoAdvance) return;
+
+        var current = CurrentMark();
+        if (current != null && !current.Dead) return;
+        if (current == null && _currentMark != null)
+        {
+            // The pointed-at mark was removed from the list entirely.
+            _currentMark = null;
+        }
+
+        var next = NextLiveMark();
+        if (next == null) return;
+
+        SetCurrentMark(next, announce: _config.EchoOnAdvance);
+    }
+
+    private void OnNextAetheryteCommand(string command, string args)
+    {
+        var next = NextLiveMark();
+        if (next == null)
+        {
+            _chatGui.Print("[Hunt Train Relay] No live marks left in the train.");
+            return;
+        }
+
+        var aetheryte = TeleportHelper.NearestTo(next.TerritoryId, next.MapPosition);
+        if (aetheryte is not { } aeth)
+        {
+            _chatGui.Print($"[Hunt Train Relay] No known aetheryte near {next.Name}.");
+            return;
+        }
+
+        // Deliberately no map flag here: conductors call this out ahead of time
+        // while the train is still travelling, and plugins like Hunt Train
+        // Assistant auto-follow flags the conductor posts — dropping one early
+        // would pull people off the current mark.
+        var line = $"Teleport to {aeth.Name} after this mark!";
+
+        var sb = new Dalamud.Game.Text.SeStringHandling.SeStringBuilder();
+        sb.AddUiForeground(TrainChatEcho.GoldColour);
+        sb.AddText("[Hunt Train Relay] ");
+        sb.AddUiForegroundOff();
+        sb.AddText(line);
+        _chatGui.Print(sb.BuiltString);
+
+        ImGui.SetClipboardText(line);
+    }
+
     /// <summary>
     /// Scanning play/pause plus the tidy-up actions. Shown on both the Train
     /// tab and the popout, so a conductor working from the popout alone still
@@ -363,6 +482,21 @@ public sealed class Plugin : IDalamudPlugin
         {
             _detector.RemoveDead();
         }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Next Mark"))
+        {
+            SetCurrentMark(NextLiveMark(), announce: true);
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Move to the next live mark and flag it");
+
+        ImGui.SameLine();
+        if (ImGui.Button("Next Aetheryte"))
+        {
+            OnNextAetheryteCommand(NextAetheryteCommand, string.Empty);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Names the aetheryte nearest the next mark, and copies a line to your clipboard. No flag — see /htra");
 
         ImGui.SameLine();
         ImGui.TextDisabled(_config.ScanningPaused ? "Paused" : "Scanning");
@@ -450,7 +584,18 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.SameLine();
             ImGui.SetCursorPosX(nameColumnX);
             var ageSuffix = _config.ShowMarkAge ? $"  ({FormatAge(mark.LastSeenUtc)})" : string.Empty;
-            ImGui.Text($"{mark.Name}{glyph}{ageSuffix}");
+            var isCurrent = _currentMark is { } cur
+                            && cur.NameId == mark.NameId && cur.Instance == mark.Instance;
+            if (isCurrent)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.85f, 0.4f, 1f));
+                ImGui.Text($"> {mark.Name}{glyph}{ageSuffix}");
+                ImGui.PopStyleColor();
+            }
+            else
+            {
+                ImGui.Text($"{mark.Name}{glyph}{ageSuffix}");
+            }
             ImGui.SetItemAllowOverlap();
 
             ImGui.SameLine();
@@ -526,6 +671,10 @@ public sealed class Plugin : IDalamudPlugin
                 && ImGui.IsMouseReleased(ImGuiMouseButton.Left)
                 && Math.Abs(ImGui.GetMouseDragDelta().Y) < 0.1f)
             {
+                // Clicking a mark makes it the current one, so a conductor can
+                // jump the pointer anywhere just by clicking.
+                _currentMark = (mark.NameId, mark.Instance);
+
                 if (_config.EchoOnMarkClick)
                     TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
                 else
@@ -1030,6 +1179,23 @@ public sealed class Plugin : IDalamudPlugin
         }
         ImGui.TextDisabled("Keeps the popout narrow. The Train tab always shows them.");
 
+        var autoAdv = _config.AutoAdvance;
+        if (ImGui.Checkbox("Auto-advance to the next mark when the current one dies", ref autoAdv))
+        {
+            _config.AutoAdvance = autoAdv;
+            _config.Save();
+        }
+
+        if (_config.AutoAdvance)
+        {
+            var echoAdv = _config.EchoOnAdvance;
+            if (ImGui.Checkbox("Echo and flag the mark it advances to", ref echoAdv))
+            {
+                _config.EchoOnAdvance = echoAdv;
+                _config.Save();
+            }
+        }
+
         var rowH = _config.TrainRowHeight;
         ImGui.SetNextItemWidth(120);
         if (ImGui.InputInt("Row height (pixels)", ref rowH))
@@ -1174,5 +1340,6 @@ public sealed class Plugin : IDalamudPlugin
         _commandManager.RemoveHandler(ConfigCommand);
         _commandManager.RemoveHandler(TrainCommand);
         _commandManager.RemoveHandler(CounterCommand);
+        _commandManager.RemoveHandler(NextAetheryteCommand);
     }
 }
