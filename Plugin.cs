@@ -1,5 +1,7 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
+using Dalamud.Interface;
+using Dalamud.Interface.Components;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using System;
@@ -315,6 +317,42 @@ public sealed class Plugin : IDalamudPlugin
     /// Drawn in both the Train tab and the standalone popout.
     /// </summary>
     /// <summary>
+    /// Scanning play/pause plus the tidy-up actions. Shown on both the Train
+    /// tab and the popout, so a conductor working from the popout alone still
+    /// has everything they need mid-train.
+    /// </summary>
+    private void DrawTrainControls()
+    {
+        if (_config.ScanningPaused)
+        {
+            if (ImGuiComponents.IconButton(FontAwesomeIcon.Play))
+            {
+                _config.ScanningPaused = false;
+                _config.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Paused — click to resume picking up new marks");
+        }
+        else
+        {
+            if (ImGuiComponents.IconButton(FontAwesomeIcon.Pause))
+            {
+                _config.ScanningPaused = true;
+                _config.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Scanning — click to stop picking up new marks");
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Remove Dead"))
+        {
+            _detector.RemoveDead();
+        }
+
+        ImGui.SameLine();
+        ImGui.TextDisabled(_config.ScanningPaused ? "Paused" : "Scanning");
+    }
+
+    /// <summary>
     /// The train list, with drag-to-reorder.
     ///
     /// The important property here: NOTHING is reordered while the drag is in
@@ -426,6 +464,20 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.EndGroup();
             ImGui.PopStyleColor();
 
+            // Drop indicator: a bright line on the edge of the row the release
+            // would land on, so it's obvious where the mark is going.
+            if (dragging && _dragToIndex == i && _dragFromIndex != i)
+            {
+                var rowMin = ImGui.GetItemRectMin();
+                var rowMax = ImGui.GetItemRectMax();
+                var edgeY = _dragToIndex < _dragFromIndex ? rowMin.Y : rowMax.Y;
+                ImGui.GetWindowDrawList().AddLine(
+                    new Vector2(rowMin.X, edgeY),
+                    new Vector2(rowMax.X, edgeY),
+                    ImGui.GetColorU32(ImGuiCol.DragDropTarget),
+                    2.5f);
+            }
+
             // --- drag: only ever RECORDS intent, never mutates the list ---
             if (_dragFromIndex == -1
                 && ImGui.IsItemActive()
@@ -451,6 +503,19 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             ImGui.PopID();
+        }
+
+        // --- floating preview under the cursor while dragging ---
+        // Gemini suggested doing this inside BeginDragDropSource, but this
+        // implementation tracks the drag manually rather than through an ImGui
+        // payload, so a plain tooltip gives the same cursor-following preview.
+        if (dragging && _dragFromIndex < marks.Count)
+        {
+            var source = marks[_dragFromIndex];
+            var sourceZone = ExpansionData.Lookup(source.NameId)?.Location ?? "?";
+            ImGui.BeginTooltip();
+            ImGui.TextUnformatted($"「{sourceZone}」 {source.Name}{ExpansionData.InstanceGlyph(source.Instance)}");
+            ImGui.EndTooltip();
         }
 
         // --- commit the move exactly once, on release, after the loop ---
@@ -490,14 +555,12 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextDisabled("Both lists always populate, so you can compare them before switching over.");
 
         ImGui.Spacing();
+        DrawTrainControls();
+
+        ImGui.Spacing();
         if (ImGui.Button("Open Train Popout"))
         {
             _trainPopoutVisible = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Remove Dead"))
-        {
-            _detector.RemoveDead();
         }
         ImGui.SameLine();
         if (ImGui.Button("Clear All"))
@@ -554,6 +617,8 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.SetNextWindowSizeConstraints(new Vector2(420, 200), new Vector2(float.MaxValue, float.MaxValue));
         if (ImGui.Begin("Hunt Train", ref _trainPopoutVisible))
         {
+            DrawTrainControls();
+            ImGui.Spacing();
             DrawTrainList();
         }
         ImGui.End();

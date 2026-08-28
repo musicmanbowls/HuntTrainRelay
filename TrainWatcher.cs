@@ -142,7 +142,7 @@ public class TrainWatcher : IDisposable
         // source — that's what makes side-by-side comparison possible.
         try
         {
-            _detector.Scan();
+            _detector.Scan(recordNew: !_config.ScanningPaused);
         }
         catch (Exception ex)
         {

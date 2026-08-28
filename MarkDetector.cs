@@ -120,8 +120,13 @@ public sealed class MarkDetector
     /// One scan pass. Adds any newly sighted A-rank marks and refreshes the last
     /// seen time on ones already known. Never removes anything — a mark going out
     /// of render range shouldn't drop it from the train.
+    ///
+    /// When recordNew is false, marks already in the list still update, but
+    /// nothing new is picked up — that's the pause button, and it's deliberately
+    /// narrower than switching tracking off entirely (which would also stop
+    /// kill-time recording for the marks already being tracked).
     /// </summary>
-    public void Scan()
+    public void Scan(bool recordNew = true)
     {
         var territoryId = _clientState.TerritoryType;
         if (territoryId == 0) return;
@@ -145,6 +150,8 @@ public sealed class MarkDetector
                 existing.MapPosition = ToMapCoordinate(mob.Position, scale);
                 continue;
             }
+
+            if (!recordNew) continue;
 
             _marks[key] = new DetectedMark
             {
