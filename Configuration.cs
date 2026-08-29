@@ -120,6 +120,13 @@ public class Configuration : IPluginConfiguration
     /// <summary>Echo (and flag) the new current mark when the pointer advances.</summary>
     public bool EchoOnAdvance { get; set; } = true;
 
+    /// <summary>
+    /// Hide marks already killed from the train list display. They stay in the
+    /// train and still appear in reports with their kill times — this only
+    /// shortens what's on screen.
+    /// </summary>
+    public bool HideDeadMarks { get; set; } = false;
+
     /// <summary>Height of a train list row, in pixels.</summary>
     public int TrainRowHeight { get; set; } = 22;
 

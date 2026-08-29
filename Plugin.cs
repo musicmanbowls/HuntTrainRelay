@@ -164,7 +164,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (_config.UseOwnTrainList)
         {
-            return _detector.Marks.Values.Select(d => new TrackedMark
+            return _detector.Ordered().Select(d => new TrackedMark
             {
                 Name = d.Name,
                 ModelId = d.NameId,
@@ -216,7 +216,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (_config.UseOwnTrainList)
         {
-            list = _detector.Marks.Values.Select(d => new HuntHelperMobRecord(
+            list = _detector.Ordered().Select(d => new HuntHelperMobRecord(
                 d.Name, d.NameId, d.TerritoryId, d.MapId, d.Instance,
                 d.MapPosition, d.Dead, d.LastSeenUtc)).ToList();
         }
@@ -500,6 +500,23 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.SameLine();
         ImGui.TextDisabled(_config.ScanningPaused ? "Paused" : "Scanning");
+
+        var tracking = _config.TrackingEnabled;
+        if (ImGui.Checkbox("Tracking this train (records exact kill times)", ref tracking))
+        {
+            _config.TrackingEnabled = tracking;
+            _config.Save();
+        }
+
+        ImGui.SameLine();
+        var hideDead = _config.HideDeadMarks;
+        if (ImGui.Checkbox("Hide dead", ref hideDead))
+        {
+            _config.HideDeadMarks = hideDead;
+            _config.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Only hides them from this list — they stay in the train and in reports.");
     }
 
     /// <summary>
@@ -518,11 +535,23 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     private void DrawTrainList(bool showZones = true)
     {
-        var marks = _detector.Ordered();
+        var allMarks = _detector.Ordered();
+
+        if (allMarks.Count == 0)
+        {
+            ImGui.TextDisabled("No marks detected yet — fly near one and it'll appear here.");
+            return;
+        }
+
+        // What's shown may be a subset, but ordering maths always works against
+        // the full list so hidden dead marks keep their place in the train.
+        var marks = _config.HideDeadMarks
+            ? allMarks.Where(m => !m.Dead).ToList()
+            : allMarks;
 
         if (marks.Count == 0)
         {
-            ImGui.TextDisabled("No marks detected yet — fly near one and it'll appear here.");
+            ImGui.TextDisabled($"All {allMarks.Count} marks are dead — untick \"Hide dead marks\" to see them.");
             return;
         }
 
@@ -676,7 +705,10 @@ public sealed class Plugin : IDalamudPlugin
                 _currentMark = (mark.NameId, mark.Instance);
 
                 if (_config.EchoOnMarkClick)
-                    TrainChatEcho.Send(_chatGui, _gameGui, mark, i, marks.Count);
+                {
+                    var fullIndex = allMarks.FindIndex(m => m.NameId == mark.NameId && m.Instance == mark.Instance);
+                    TrainChatEcho.Send(_chatGui, _gameGui, mark, fullIndex < 0 ? i : fullIndex, allMarks.Count);
+                }
                 else
                     MapFlagHelper.FlagMark(_gameGui, mark);
             }
@@ -705,10 +737,21 @@ public sealed class Plugin : IDalamudPlugin
                 && _dragFromIndex < marks.Count
                 && _dragToIndex < marks.Count)
             {
+                // Translate the visible positions back to positions in the full
+                // list, so dragging still lands correctly when dead marks are
+                // hidden between the rows being moved.
                 var moving = marks[_dragFromIndex];
-                marks.RemoveAt(_dragFromIndex);
-                marks.Insert(_dragToIndex, moving);
-                _detector.ApplyOrder(marks);
+                var target = marks[_dragToIndex];
+
+                var fromFull = allMarks.FindIndex(m => m.NameId == moving.NameId && m.Instance == moving.Instance);
+                var toFull = allMarks.FindIndex(m => m.NameId == target.NameId && m.Instance == target.Instance);
+
+                if (fromFull >= 0 && toFull >= 0)
+                {
+                    allMarks.RemoveAt(fromFull);
+                    allMarks.Insert(toFull, moving);
+                    _detector.ApplyOrder(allMarks);
+                }
             }
 
             _dragFromIndex = -1;
@@ -785,7 +828,11 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Separator();
         ImGui.Spacing();
 
-        DrawTrainList();
+        if (ImGui.BeginChild("trainTabScroll", new Vector2(0, 0), false))
+        {
+            DrawTrainList();
+        }
+        ImGui.EndChild();
     }
 
     private void DrawTrainPopout()
@@ -796,9 +843,16 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.SetNextWindowSizeConstraints(new Vector2(420, 200), new Vector2(float.MaxValue, float.MaxValue));
         if (ImGui.Begin("Hunt Train", ref _trainPopoutVisible))
         {
+            // Controls sit outside the scrolling region so they stay put while
+            // the list scrolls underneath.
             DrawTrainControls();
-            ImGui.Spacing();
-            DrawTrainList(showZones: !_config.HideZonesInPopout);
+            ImGui.Separator();
+
+            if (ImGui.BeginChild("trainScroll", new Vector2(0, 0), false))
+            {
+                DrawTrainList(showZones: !_config.HideZonesInPopout);
+            }
+            ImGui.EndChild();
         }
         ImGui.End();
     }
@@ -1195,6 +1249,14 @@ public sealed class Plugin : IDalamudPlugin
                 _config.Save();
             }
         }
+
+        var hideDeadSetting = _config.HideDeadMarks;
+        if (ImGui.Checkbox("Hide dead marks in the train list", ref hideDeadSetting))
+        {
+            _config.HideDeadMarks = hideDeadSetting;
+            _config.Save();
+        }
+        ImGui.TextDisabled("Display only — dead marks stay in the train and in reports.");
 
         var rowH = _config.TrainRowHeight;
         ImGui.SetNextItemWidth(120);
