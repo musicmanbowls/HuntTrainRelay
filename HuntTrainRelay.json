@@ -10,7 +10,7 @@
     "webhook"
   ],
   "InternalName": "HuntTrainRelay",
-  "AssemblyVersion": "1.10.2.0",
+  "AssemblyVersion": "1.10.3.0",
   "RepoUrl": "https://github.com/MusicManBowls/HuntTrainRelay",
   "ApplicableVersion": "any",
   "LoadPriority": 0,

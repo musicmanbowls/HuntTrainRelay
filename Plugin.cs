@@ -848,11 +848,28 @@ public sealed class Plugin : IDalamudPlugin
             DrawTrainControls();
             ImGui.Separator();
 
-            if (ImGui.BeginChild("trainScroll", new Vector2(0, 0), false))
+            // Reserve room at the bottom for the footer, so the list scrolls
+            // between two fixed strips rather than under them.
+            var footerHeight = ImGui.GetFrameHeightWithSpacing() + ImGui.GetStyle().ItemSpacing.Y * 2;
+            if (ImGui.BeginChild("trainScroll", new Vector2(0, -footerHeight), false))
             {
                 DrawTrainList(showZones: !_config.HideZonesInPopout);
             }
             ImGui.EndChild();
+
+            // Footer: the two actions that actually send something. Deliberately
+            // separated from the controls above so neither gets hit by accident
+            // while reaching for play/pause mid-train.
+            ImGui.Separator();
+            if (ImGui.Button("Send Scouting Report"))
+            {
+                _ = SendScoutingReportAsync();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("End Train Now"))
+            {
+                _ = EndTrainNowAsync();
+            }
         }
         ImGui.End();
     }
