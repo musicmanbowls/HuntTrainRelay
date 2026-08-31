@@ -1,6 +1,7 @@
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
 using Dalamud.Plugin.Services;
+using Lumina.Excel.Sheets;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -130,13 +131,81 @@ public sealed class TeleportHelper
     private readonly ICallGateSubscriber<uint, byte, bool> _teleportIpc;
     private readonly IPluginLog _log;
 
+    // Corrections discovered from the game's own Aetheryte sheet, keyed by our
+    // hardcoded id. See VerifyAgainstGameData.
+    private static readonly Dictionary<uint, uint> IdCorrections = new();
+
     public string LastError { get; private set; } = string.Empty;
 
-    public TeleportHelper(IDalamudPluginInterface pluginInterface, IPluginLog log)
+    public TeleportHelper(IDalamudPluginInterface pluginInterface, IPluginLog log, IDataManager dataManager)
     {
         _log = log;
         _teleportIpc = pluginInterface.GetIpcSubscriber<uint, byte, bool>("Teleport");
+        VerifyAgainstGameData(dataManager);
     }
+
+    /// <summary>
+    /// Our aetheryte table was copied from Hunt Helper, so it inherits any
+    /// wrong ids it had — Dock Poga in Kozama'uka being the known case, where a
+    /// bad id made teleport fail silently in both plugins.
+    ///
+    /// Rather than hand-patch numbers, this checks each entry's name against
+    /// the game's own Aetheryte sheet for that territory at startup and records
+    /// a correction when the real row id differs. Positions still come from the
+    /// table (map coordinates aren't in that sheet), but ids become correct by
+    /// construction, including for aetherytes added in later patches.
+    /// </summary>
+    private void VerifyAgainstGameData(IDataManager dataManager)
+    {
+        try
+        {
+            var sheet = dataManager.GetExcelSheet<Aetheryte>();
+            if (sheet == null) return;
+
+            foreach (var row in sheet)
+            {
+                if (!row.IsAetheryte) continue;
+
+                var territory = row.Territory.RowId;
+                if (territory == 0) continue;
+
+                var name = row.PlaceName.ValueNullable?.Name.ExtractText();
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                foreach (var entry in Aetherytes)
+                {
+                    if (entry.TerritoryId != territory) continue;
+                    if (!string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (entry.AetheryteId == row.RowId) continue;
+
+                    // If two sheet rows somehow claim the same name in the same
+                    // zone, keep the first and leave a note rather than letting
+                    // the last one silently win.
+                    if (IdCorrections.TryGetValue(entry.AetheryteId, out var already))
+                    {
+                        if (already != row.RowId)
+                            _log.Warning(
+                                $"Ambiguous aetheryte \"{entry.Name}\" in territory {territory}: " +
+                                $"already mapped to {already}, also saw {row.RowId}. Keeping {already}.");
+                        continue;
+                    }
+
+                    IdCorrections[entry.AetheryteId] = row.RowId;
+                    _log.Information(
+                        $"Corrected aetheryte \"{entry.Name}\": table said {entry.AetheryteId}, " +
+                        $"game data says {row.RowId}.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Falling back to the hardcoded ids is no worse than before.
+            _log.Warning(ex, "Could not verify aetheryte ids against game data; using the built-in table.");
+        }
+    }
+
+    private static uint ResolveId(uint tableId) =>
+        IdCorrections.TryGetValue(tableId, out var corrected) ? corrected : tableId;
 
     /// <summary>
     /// The closest aetheryte to a point in a zone, or null if that zone has
@@ -172,10 +241,16 @@ public sealed class TeleportHelper
             // This used to be discarded, so a rejected teleport looked like a
             // success and failed in complete silence — which is why the Dock
             // Poga case gave no clue what was wrong.
-            var accepted = _teleportIpc.InvokeFunc(nearest.AetheryteId, nearest.SubIndex);
+            var aetheryteId = ResolveId(nearest.AetheryteId);
+
+            _log.Information(
+                $"Teleport attempt: \"{nearest.Name}\" aetheryteId={aetheryteId} " +
+                $"subIndex={nearest.SubIndex} territory={territoryId}");
+
+            var accepted = _teleportIpc.InvokeFunc(aetheryteId, nearest.SubIndex);
             if (!accepted)
             {
-                LastError = $"Teleporter refused \"{nearest.Name}\" (aetheryte {nearest.AetheryteId}" +
+                LastError = $"Teleporter refused \"{nearest.Name}\" (aetheryte {aetheryteId}" +
                             $", sub {nearest.SubIndex}) — likely not attuned, or a bad ID in our table.";
                 return false;
             }

@@ -109,7 +109,7 @@ public sealed class Plugin : IDalamudPlugin
         _clientState = clientState;
         _huntTally = new HuntTallyIpc(_pluginInterface, _log);
         _detector = new MarkDetector(objectTable, clientState, dataManager);
-        _teleport = new TeleportHelper(_pluginInterface, _log);
+        _teleport = new TeleportHelper(_pluginInterface, _log, dataManager);
         _watcher = new TrainWatcher(framework, _ipc, _huntTally, _detector, _config);
         _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config, _detector);
         _counter = new HuntCounter(chatGui);
@@ -465,6 +465,20 @@ public sealed class Plugin : IDalamudPlugin
     /// has everything they need mid-train.
     /// </summary>
 
+
+    /// <summary>
+    /// Surfaces a problem everywhere it might be looked for: the status line in
+    /// the main window, the local chat log, and /xllog. Teleport errors were
+    /// previously only written to a field rendered inside the main window, so
+    /// clicking teleport from the popout failed in complete silence.
+    /// </summary>
+    private void ReportProblem(string message)
+    {
+        _lastPostResult = message;
+        _chatGui.PrintError($"[Hunt Train Relay] {message}");
+        _log.Warning(message);
+    }
+
     /// <summary>
     /// The actions that actually send something, or throw a train away. All
     /// three require Shift to be held: they're irreversible enough that a
@@ -727,7 +741,7 @@ public sealed class Plugin : IDalamudPlugin
             if (teleportPressed)
             {
                 if (!_teleport.TeleportToNearest(mark.TerritoryId, mark.MapPosition))
-                    _lastPostResult = _teleport.LastError;
+                    ReportProblem(_teleport.LastError);
                 else if (_config.TeleportAlsoFlags)
                     MapFlagHelper.FlagMark(_gameGui, mark);
             }
