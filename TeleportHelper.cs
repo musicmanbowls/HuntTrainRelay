@@ -135,6 +135,22 @@ public sealed class TeleportHelper
     // hardcoded id. See VerifyAgainstGameData.
     private static readonly Dictionary<uint, uint> IdCorrections = new();
 
+    /// <summary>
+    /// Zones with no aetheryte of their own, mapped to where you'd actually
+    /// teleport for them. The Dravanian Hinterlands is the only hunt zone in
+    /// the game like this — everyone uses Idyllshire next door.
+    /// </summary>
+    private static readonly Dictionary<uint, uint> ZoneAetheryteSource = new()
+    {
+        [399] = 478, // The Dravanian Hinterlands -> Idyllshire
+    };
+
+    /// <summary>Aetheryte ids the user never wants routed to.</summary>
+    public static HashSet<uint> Blacklist { get; } = new();
+
+    /// <summary>Every known aetheryte, for building the blacklist picker.</summary>
+    public static IReadOnlyList<AetheryteData> All => Aetherytes;
+
     public string LastError { get; private set; } = string.Empty;
 
     public TeleportHelper(IDalamudPluginInterface pluginInterface, IPluginLog log, IDataManager dataManager)
@@ -213,10 +229,26 @@ public sealed class TeleportHelper
     /// </summary>
     public static AetheryteData? NearestTo(uint territoryId, Vector2 mapPosition)
     {
-        var candidates = Aetherytes.Where(a => a.TerritoryId == territoryId).ToList();
-        if (candidates.Count == 0) return null;
+        // Some zones have no aetheryte of their own and are served by a
+        // neighbour, so search there instead.
+        var searchTerritory = ZoneAetheryteSource.TryGetValue(territoryId, out var source)
+            ? source
+            : territoryId;
 
-        return candidates
+        var inZone = Aetherytes.Where(a => a.TerritoryId == searchTerritory).ToList();
+        if (inZone.Count == 0) return null;
+
+        var allowed = inZone.Where(a => !Blacklist.Contains(a.AetheryteId)).ToList();
+
+        // Deliberately no silent fallback to a blacklisted aetheryte: quietly
+        // ignoring the setting is worse than saying nothing fits.
+        if (allowed.Count == 0) return null;
+
+        // When routed to a neighbouring zone, distance to the mark is
+        // meaningless — just take the first allowed aetheryte there.
+        if (searchTerritory != territoryId) return allowed[0];
+
+        return allowed
             .OrderBy(a => Vector2.DistanceSquared(a.Position, mapPosition))
             .First();
     }
@@ -231,7 +263,9 @@ public sealed class TeleportHelper
         var found = NearestTo(territoryId, mapPosition);
         if (found is not { } nearest)
         {
-            LastError = "No known aetheryte for that zone.";
+            LastError = Aetherytes.Any(a => a.TerritoryId == territoryId) || ZoneAetheryteSource.ContainsKey(territoryId)
+                ? "Every aetheryte for that zone is blacklisted."
+                : "No known aetheryte for that zone.";
             return false;
         }
 

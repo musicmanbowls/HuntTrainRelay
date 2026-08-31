@@ -65,6 +65,10 @@ public sealed class Plugin : IDalamudPlugin
     private bool _trainPopoutVisible;
     private bool _counterPopoutVisible;
     private string _importCode = string.Empty;
+    private string _customFlagLabel = string.Empty;
+    private int _blacklistExpansion;
+    private int _blacklistZone;
+    private int _blacklistAetheryte;
 
     // Drag state for the train list. Both are -1 when no drag is in progress.
     private int _dragFromIndex = -1;
@@ -110,6 +114,7 @@ public sealed class Plugin : IDalamudPlugin
         _huntTally = new HuntTallyIpc(_pluginInterface, _log);
         _detector = new MarkDetector(objectTable, clientState, dataManager);
         _teleport = new TeleportHelper(_pluginInterface, _log, dataManager);
+        SyncBlacklist();
         _watcher = new TrainWatcher(framework, _ipc, _huntTally, _detector, _config);
         _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config, _detector);
         _counter = new HuntCounter(chatGui);
@@ -172,7 +177,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (_config.UseOwnTrainList)
         {
-            return _detector.Ordered().Select(d => new TrackedMark
+            return _detector.Ordered().Where(d => !d.IsCustom).Select(d => new TrackedMark
             {
                 Name = d.Name,
                 ModelId = d.NameId,
@@ -224,7 +229,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (_config.UseOwnTrainList)
         {
-            list = _detector.Ordered().Select(d => new HuntHelperMobRecord(
+            list = _detector.Ordered().Where(d => !d.IsCustom).Select(d => new HuntHelperMobRecord(
                 d.Name, d.NameId, d.TerritoryId, d.MapId, d.Instance,
                 d.MapPosition, d.Dead, d.LastSeenUtc)).ToList();
         }
@@ -472,6 +477,14 @@ public sealed class Plugin : IDalamudPlugin
     /// previously only written to a field rendered inside the main window, so
     /// clicking teleport from the popout failed in complete silence.
     /// </summary>
+    /// <summary>Pushes the saved blacklist into the teleport helper.</summary>
+    private void SyncBlacklist()
+    {
+        TeleportHelper.Blacklist.Clear();
+        foreach (var id in _config.BlacklistedAetherytes)
+            TeleportHelper.Blacklist.Add(id);
+    }
+
     private void ReportProblem(string message)
     {
         _lastPostResult = message;
@@ -529,6 +542,119 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+
+    private const int MaxBlacklistedAetherytes = 15;
+
+    private static readonly (string Name, uint Min, uint Max)[] ExpansionRanges =
+    {
+        ("A Realm Reborn", 0, 396),
+        ("Heavensward", 397, 611),
+        ("Stormblood", 612, 812),
+        ("Shadowbringers", 813, 955),
+        ("Endwalker", 956, 1186),
+        ("Dawntrail", 1187, 9999),
+    };
+
+    /// <summary>
+    /// Expansion -> zone -> aetheryte picker for the blacklist. Zone names come
+    /// from the game's own data rather than a hardcoded list, so they're correct
+    /// and localised; expansion grouping is by territory id range.
+    /// </summary>
+    private void DrawBlacklistPicker()
+    {
+        var expansionNames = ExpansionRanges.Select(e => e.Name).ToArray();
+        ImGui.SetNextItemWidth(160);
+        if (ImGui.Combo("Expansion", ref _blacklistExpansion, expansionNames, expansionNames.Length))
+        {
+            _blacklistZone = 0;
+            _blacklistAetheryte = 0;
+        }
+
+        var range = ExpansionRanges[Math.Clamp(_blacklistExpansion, 0, ExpansionRanges.Length - 1)];
+
+        var zones = TeleportHelper.All
+            .Where(a => a.TerritoryId >= range.Min && a.TerritoryId <= range.Max)
+            .Select(a => a.TerritoryId)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToList();
+
+        if (zones.Count == 0)
+        {
+            ImGui.TextDisabled("No aetherytes known for that expansion.");
+            return;
+        }
+
+        var zoneNames = zones.Select(t => _detector.GetZoneName(t)).ToArray();
+        _blacklistZone = Math.Clamp(_blacklistZone, 0, zones.Count - 1);
+        ImGui.SetNextItemWidth(200);
+        if (ImGui.Combo("Zone", ref _blacklistZone, zoneNames, zoneNames.Length))
+        {
+            _blacklistAetheryte = 0;
+        }
+
+        var inZone = TeleportHelper.All
+            .Where(a => a.TerritoryId == zones[_blacklistZone])
+            .OrderBy(a => a.Name)
+            .ToList();
+
+        if (inZone.Count == 0)
+        {
+            ImGui.TextDisabled("No aetherytes in that zone.");
+            return;
+        }
+
+        var aetheryteNames = inZone.Select(a => a.Name).ToArray();
+        _blacklistAetheryte = Math.Clamp(_blacklistAetheryte, 0, inZone.Count - 1);
+        ImGui.SetNextItemWidth(200);
+        ImGui.Combo("Aetheryte", ref _blacklistAetheryte, aetheryteNames, aetheryteNames.Length);
+
+        ImGui.SameLine();
+        if (ImGui.Button("Blacklist"))
+        {
+            var chosen = inZone[_blacklistAetheryte];
+            if (_config.BlacklistedAetherytes.Count >= MaxBlacklistedAetherytes)
+                _lastPostResult = $"Blacklist is full ({MaxBlacklistedAetherytes}).";
+            else if (_config.BlacklistedAetherytes.Contains(chosen.AetheryteId))
+                _lastPostResult = $"{chosen.Name} is already blacklisted.";
+            else
+            {
+                _config.BlacklistedAetherytes.Add(chosen.AetheryteId);
+                _config.Save();
+                SyncBlacklist();
+            }
+        }
+
+        ImGui.Spacing();
+
+        if (_config.BlacklistedAetherytes.Count == 0)
+        {
+            ImGui.TextDisabled("Nothing blacklisted.");
+            return;
+        }
+
+        uint? toUnblock = null;
+        foreach (var id in _config.BlacklistedAetherytes)
+        {
+            var match = TeleportHelper.All.FirstOrDefault(a => a.AetheryteId == id);
+            var label = string.IsNullOrEmpty(match.Name) ? $"Aetheryte {id}" : match.Name;
+            var zoneLabel = match.TerritoryId == 0 ? "" : $" — {_detector.GetZoneName(match.TerritoryId)}";
+
+            ImGui.PushID((int)id);
+            ImGui.TextWrapped($"{label}{zoneLabel}");
+            ImGui.SameLine();
+            if (ImGui.SmallButton("remove")) toUnblock = id;
+            ImGui.PopID();
+        }
+
+        if (toUnblock.HasValue)
+        {
+            _config.BlacklistedAetherytes.Remove(toUnblock.Value);
+            _config.Save();
+            SyncBlacklist();
+        }
+    }
+
     private void DrawTrainControls()
     {
         // Row 1: scanning state.
@@ -566,6 +692,22 @@ public sealed class Plugin : IDalamudPlugin
             SetCurrentMark(NextLiveMark(), announce: true);
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Move to the next live mark and flag it");
+
+        ImGui.SameLine();
+        if (ImGui.Button("Add Flag"))
+        {
+            var added = _detector.AddCustomFlag(_customFlagLabel);
+            if (added == null)
+                ReportProblem("No map flag set — place one with Ctrl+Right-Click first.");
+            else
+                _customFlagLabel = string.Empty;
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Adds your current map flag to the train as a custom stop");
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(110);
+        ImGui.InputTextWithHint("##customFlagLabel", "flag name", ref _customFlagLabel, 64);
 
         ImGui.SameLine();
         if (ImGui.Button("Next Aetheryte"))
@@ -672,7 +814,7 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.PushID($"{mark.NameId}_{mark.Instance}");
 
             var info = ExpansionData.Lookup(mark.NameId);
-            var zone = info?.Location ?? "?";
+            var zone = info?.Location ?? (mark.IsCustom ? mark.ZoneName : "?");
             var glyph = ExpansionData.InstanceGlyph(mark.Instance);
 
             ImGui.PushStyleColor(ImGuiCol.Text,
@@ -1367,6 +1509,18 @@ public sealed class Plugin : IDalamudPlugin
             _config.Save();
         }
         ImGui.TextDisabled("Display only — dead marks stay in the train and in reports.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextWrapped("Aetheryte blacklist");
+        ImGui.TextDisabled("Never route to these. Affects the teleport button and Next Aetheryte alike.");
+        ImGui.Spacing();
+        DrawBlacklistPicker();
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
 
         var rowH = _config.TrainRowHeight;
         ImGui.SetNextItemWidth(120);

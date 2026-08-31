@@ -25,6 +25,15 @@ public class ExchangeMob
     public uint TerritoryID { get; set; }
     public uint MapID { get; set; }
     public uint Instance { get; set; }
+
+    /// <summary>
+    /// Our own extension — conductor-placed flags rather than detected marks.
+    /// Hunt Helper's importer ignores fields it doesn't know, so adding this
+    /// doesn't break compatibility either way.
+    /// </summary>
+    public bool IsCustom { get; set; }
+
+    public string ZoneName { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -47,6 +56,8 @@ public static class TrainExchange
             TerritoryID = m.TerritoryId,
             MapID = m.MapId,
             Instance = m.Instance,
+            IsCustom = m.IsCustom,
+            ZoneName = m.ZoneName,
         }).ToList();
 
         var json = JsonConvert.SerializeObject(payload);
@@ -91,6 +102,8 @@ public static class TrainExchange
                 FirstSeenUtc = m.LastSeenUTC,
                 LastSeenUtc = m.LastSeenUTC,
                 DeathObservedAtUtc = m.Dead ? m.LastSeenUTC : null,
+                IsCustom = m.IsCustom,
+                ZoneName = m.ZoneName,
             }).ToList();
         }
         catch

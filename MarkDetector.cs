@@ -32,6 +32,16 @@ public class DetectedMark
     /// be rewritten freely by drag-and-drop reordering.
     /// </summary>
     public int Order;
+
+    /// <summary>
+    /// A conductor-placed flag rather than a detected mark. Behaves like any
+    /// other row (teleport, dead, drag, auto-advance) but is left out of the
+    /// final train report.
+    /// </summary>
+    public bool IsCustom;
+
+    /// <summary>Zone label for custom entries, which have no mark data to look up.</summary>
+    public string ZoneName = string.Empty;
 }
 
 /// <summary>
@@ -51,6 +61,10 @@ public sealed class MarkDetector
 
     private readonly Dictionary<(uint NameId, uint Instance), DetectedMark> _marks = new();
     private int _nextOrder;
+
+    // Synthetic ids for custom flags, counting down from the top so they can
+    // never collide with a real BNpcName row id.
+    private uint _nextCustomId = uint.MaxValue;
 
     /// <summary>Raised once when a mark is first picked up by scanning.</summary>
     public event Action<DetectedMark>? MarkDetected;
@@ -180,6 +194,50 @@ public sealed class MarkDetector
     /// earlier hand-entered version of this always produced a flag in the
     /// corner of the map.
     /// </summary>
+    /// <summary>
+    /// Adds a conductor-placed flag as a row in the train. Returns null if no
+    /// flag is currently set.
+    /// </summary>
+    public DetectedMark? AddCustomFlag(string label)
+    {
+        if (!FlagCapture.TryGetCurrentFlag(out var territoryId, out var mapId, out var x, out var y))
+            return null;
+
+        var mark = new DetectedMark
+        {
+            Name = string.IsNullOrWhiteSpace(label) ? "Custom Flag" : label,
+            NameId = _nextCustomId--,
+            TerritoryId = territoryId,
+            MapId = mapId,
+            Instance = 0,
+            MapPosition = new Vector2(x, y),
+            Dead = false,
+            FirstSeenUtc = DateTime.UtcNow,
+            LastSeenUtc = DateTime.UtcNow,
+            Order = _nextOrder++,
+            IsCustom = true,
+            ZoneName = GetZoneName(territoryId),
+        };
+
+        _marks[(mark.NameId, mark.Instance)] = mark;
+        return mark;
+    }
+
+    /// <summary>Zone name straight from the game's own data, so it's always correct.</summary>
+    public string GetZoneName(uint territoryId)
+    {
+        try
+        {
+            var row = _dataManager.GetExcelSheet<TerritoryType>().GetRowOrDefault(territoryId);
+            var name = row?.PlaceName.ValueNullable?.Name.ExtractText();
+            return string.IsNullOrWhiteSpace(name) ? $"Territory {territoryId}" : name;
+        }
+        catch
+        {
+            return $"Territory {territoryId}";
+        }
+    }
+
     public uint GetMapId(uint territoryId) =>
         _dataManager.GetExcelSheet<TerritoryType>().GetRowOrDefault(territoryId)?.Map.RowId ?? 0;
 

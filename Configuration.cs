@@ -127,6 +127,12 @@ public class Configuration : IPluginConfiguration
     /// </summary>
     public bool HideDeadMarks { get; set; } = false;
 
+    /// <summary>
+    /// Aetheryte ids never to route to — e.g. The Macarenses Angle in The
+    /// Tempest, which looks close on a flat map but is far below everything.
+    /// </summary>
+    public List<uint> BlacklistedAetherytes { get; set; } = new();
+
     /// <summary>Height of a train list row, in pixels.</summary>
     public int TrainRowHeight { get; set; } = 22;
 
