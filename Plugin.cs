@@ -962,12 +962,19 @@ public sealed class Plugin : IDalamudPlugin
             {
                 ImGui.SameLine();
                 ImGui.SetCursorPosX(buttonColumnX + 40);
-                if (mark.Spiced) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.35f, 0.35f, 1f));
+                // Capture the state BEFORE drawing the button. Testing
+                // mark.Spiced on both sides let the click flip it in between,
+                // so a push could go unmatched by its pop (or vice versa) —
+                // an ImGui style stack imbalance, which crashes in native code.
+                var wasSpiced = mark.Spiced;
+                if (wasSpiced) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.35f, 0.35f, 1f));
+
                 if (ImGuiComponents.IconButton(FontAwesomeIcon.PepperHot))
                 {
                     mark.Spiced = !mark.Spiced;
                 }
-                if (mark.Spiced) ImGui.PopStyleColor();
+
+                if (wasSpiced) ImGui.PopStyleColor();
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip(mark.Spiced
                         ? "Being spiced — click to unset"
