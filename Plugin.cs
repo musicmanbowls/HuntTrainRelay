@@ -249,7 +249,9 @@ public sealed class Plugin : IDalamudPlugin
         if (!string.IsNullOrWhiteSpace(selfName)) names.Add(selfName);
         names.AddRange(_config.AdditionalScouts.Where(n => !string.IsNullOrWhiteSpace(n)));
 
-        var (success, message) = await DiscordRelay.PostScoutingReportAsync(_config.Webhooks, list, names);
+        var ownCode = _config.UseOwnTrainList ? TrainExchange.Export(_detector.Ordered()) : null;
+
+        var (success, message) = await DiscordRelay.PostScoutingReportAsync(_config.Webhooks, list, names, ownCode);
         _lastPostResult = message;
         if (!success) _log.Error($"Hunt Train Relay scouting report failed: {message}");
     }
@@ -791,7 +793,8 @@ public sealed class Plugin : IDalamudPlugin
                 // flag zone names overflow into the mark name column.
                 var z = ExpansionData.Lookup(m.NameId)?.Location
                         ?? (m.IsCustom ? m.ZoneName : "?");
-                zoneColWidth = Math.Max(zoneColWidth, ImGui.CalcTextSize($"「{z}」").X);
+                var measured = m.IsCustom ? $"⚑ 「{z}」" : $"「{z}」";
+                zoneColWidth = Math.Max(zoneColWidth, ImGui.CalcTextSize(measured).X);
             }
             nameColWidth = Math.Max(nameColWidth,
                 ImGui.CalcTextSize($"{m.Name}{ExpansionData.InstanceGlyph(m.Instance)}").X);
@@ -820,8 +823,13 @@ public sealed class Plugin : IDalamudPlugin
             var zone = info?.Location ?? (mark.IsCustom ? mark.ZoneName : "?");
             var glyph = ExpansionData.InstanceGlyph(mark.Instance);
 
-            ImGui.PushStyleColor(ImGuiCol.Text,
-                mark.Dead ? new Vector4(0.45f, 0.45f, 0.45f, 1f) : Vector4.One);
+            // Precedence: dead greys out everything, then spiced, then custom.
+            var rowColour = Vector4.One;
+            if (mark.Dead) rowColour = new Vector4(0.45f, 0.45f, 0.45f, 1f);
+            else if (mark.Spiced && _config.ShowSpicing) rowColour = new Vector4(1f, 0.35f, 0.35f, 1f);
+            else if (mark.IsCustom) rowColour = new Vector4(0.45f, 0.95f, 0.5f, 1f);
+
+            ImGui.PushStyleColor(ImGuiCol.Text, rowColour);
 
             ImGui.SetCursorPosX(leftPad);
             ImGui.BeginGroup();
@@ -841,7 +849,10 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, Vector2.Zero);
             // Highlighted while it's the row being dragged.
             ImGui.SetCursorPosX(leftPad + removeColWidth);
-            ImGui.Selectable(showZones ? $"「{zone}」" : string.Empty, _dragFromIndex == i, ImGuiSelectableFlags.None,
+            var zoneLabel = showZones
+                ? (mark.IsCustom ? $"⚑ 「{zone}」" : $"「{zone}」")
+                : string.Empty;
+            ImGui.Selectable(zoneLabel, _dragFromIndex == i, ImGuiSelectableFlags.None,
                 new Vector2(ImGui.GetWindowWidth(), rowHeight));
             ImGui.SetItemAllowOverlap();
             ImGui.PopStyleVar();
@@ -886,9 +897,24 @@ public sealed class Plugin : IDalamudPlugin
             if (teleportPressed)
             {
                 if (!_teleport.TeleportToNearest(mark.TerritoryId, mark.MapPosition))
+                {
                     ReportProblem(_teleport.LastError);
-                else if (_config.TeleportAlsoFlags)
-                    MapFlagHelper.FlagMark(_gameGui, mark);
+                }
+                else
+                {
+                    if (_config.TeleportAlsoFlags)
+                        MapFlagHelper.FlagMark(_gameGui, mark);
+
+                    // A custom flag is a rally point — teleporting to it IS
+                    // completing it, so tick it off and let auto-advance move
+                    // on. Never done for real marks, which aren't dead just
+                    // because someone travelled to them.
+                    if (mark.IsCustom && !mark.Dead)
+                    {
+                        mark.Dead = true;
+                        mark.DeathObservedAtUtc = DateTime.UtcNow;
+                    }
+                }
             }
             ImGui.SetItemAllowOverlap();
 
@@ -1524,6 +1550,14 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
+
+        var spicing = _config.ShowSpicing;
+        if (ImGui.Checkbox("Show spicing markers", ref spicing))
+        {
+            _config.ShowSpicing = spicing;
+            _config.Save();
+        }
+        ImGui.TextDisabled("A scout flagging a mark they'll prep before the train arrives. Off hides the icon entirely, and imported marks look ordinary.");
 
         var rowH = _config.TrainRowHeight;
         ImGui.SetNextItemWidth(120);

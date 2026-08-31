@@ -4,15 +4,15 @@
     "Name": "Hunt Train Relay",
     "Description": "Watches Hunt Helper's train via its IPC. Ends manually via End Train Now, posting a Discord report sorted by the order marks actually died, with Assumed Sniped detection for named marks never seen. Also supports on-demand scouting reports with multi-scout credit.",
     "InternalName": "HuntTrainRelay",
-    "AssemblyVersion": "1.12.1.0",
+    "AssemblyVersion": "1.13.0.0",
     "RepoUrl": "https://github.com/MusicManBowls/HuntTrainRelay",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
     "Punchline": "Posts a Discord report sorted by kill order when you end a train, plus on-demand scouting reports.",
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/1.12.1/HuntTrainRelay.zip",
-    "DownloadLinkTesting": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/1.12.1/HuntTrainRelay.zip",
-    "DownloadLinkUpdate": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/1.12.1/HuntTrainRelay.zip"
+    "DownloadLinkInstall": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/1.13/HuntTrainRelay.zip",
+    "DownloadLinkTesting": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/1.13/HuntTrainRelay.zip",
+    "DownloadLinkUpdate": "https://github.com/MusicManBowls/HuntTrainRelay/releases/download/1.13/HuntTrainRelay.zip"
   }
 ]

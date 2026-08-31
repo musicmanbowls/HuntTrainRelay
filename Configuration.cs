@@ -133,6 +133,20 @@ public class Configuration : IPluginConfiguration
     /// </summary>
     public List<uint> BlacklistedAetherytes { get; set; } = new();
 
+    /// <summary>
+    /// Whether the default blacklist has been applied once. Without this, an
+    /// aetheryte someone deliberately un-blacklisted would silently come back
+    /// every launch.
+    /// </summary>
+    public bool BlacklistSeeded { get; set; } = false;
+
+    /// <summary>
+    /// Show the "spicing" marker — a scout flagging a mark they intend to prep
+    /// into a nastier rotation before the train arrives. Conductors who don't
+    /// use it can turn it off and imported marks look completely ordinary.
+    /// </summary>
+    public bool ShowSpicing { get; set; } = true;
+
     /// <summary>Height of a train list row, in pixels.</summary>
     public int TrainRowHeight { get; set; } = 22;
 
@@ -177,6 +191,19 @@ public class Configuration : IPluginConfiguration
         if (Webhooks == null || Webhooks.Count == 0)
         {
             Webhooks = new List<WebhookEntry> { new WebhookEntry() };
+        }
+
+        // Aetherytes that look near on a flat map but are a slog in practice.
+        // Seeded once only, so removing one makes it stay removed.
+        if (!BlacklistSeeded)
+        {
+            foreach (var id in new uint[] { 148, 181, 203 }) // Macarenses Angle, Base Omicron, Many Fires
+            {
+                if (!BlacklistedAetherytes.Contains(id))
+                    BlacklistedAetherytes.Add(id);
+            }
+            BlacklistSeeded = true;
+            Save();
         }
     }
 

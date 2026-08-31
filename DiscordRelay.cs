@@ -33,13 +33,16 @@ public static class DiscordRelay
         return SendToAllAsync(webhooks, payload);
     }
 
-    public static Task<(bool Success, string Message)> PostScoutingReportAsync(List<WebhookEntry> webhooks, List<HuntHelperMobRecord> marks, List<string> scoutNames)
+    public static Task<(bool Success, string Message)> PostScoutingReportAsync(List<WebhookEntry> webhooks, List<HuntHelperMobRecord> marks, List<string> scoutNames, string? ownFormatCode = null)
     {
         if (marks.Count == 0)
             return Task.FromResult((false, "Nothing to report — Hunt Helper's train list is empty."));
 
         var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var exportCode = ScoutingReport.BuildExportCode(marks);
+        // Prefer our own format when available: it carries custom flags and
+        // spicing, which the Hunt Helper shape has no room for. The summary
+        // text below deliberately says nothing about either.
+        var exportCode = ownFormatCode ?? ScoutingReport.BuildExportCode(marks);
         var summary = ScoutingReport.BuildSummary(marks);
 
         var names = (scoutNames ?? new List<string>()).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();

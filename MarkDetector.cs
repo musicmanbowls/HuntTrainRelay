@@ -42,6 +42,9 @@ public class DetectedMark
 
     /// <summary>Zone label for custom entries, which have no mark data to look up.</summary>
     public string ZoneName = string.Empty;
+
+    /// <summary>A scout intends to prep this mark before the train reaches it.</summary>
+    public bool Spiced;
 }
 
 /// <summary>

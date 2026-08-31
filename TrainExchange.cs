@@ -34,6 +34,9 @@ public class ExchangeMob
     public bool IsCustom { get; set; }
 
     public string ZoneName { get; set; } = string.Empty;
+
+    /// <summary>Our own extension — see DetectedMark.Spiced.</summary>
+    public bool Spiced { get; set; }
 }
 
 /// <summary>
@@ -58,6 +61,7 @@ public static class TrainExchange
             Instance = m.Instance,
             IsCustom = m.IsCustom,
             ZoneName = m.ZoneName,
+            Spiced = m.Spiced,
         }).ToList();
 
         var json = JsonConvert.SerializeObject(payload);
@@ -104,6 +108,7 @@ public static class TrainExchange
                 DeathObservedAtUtc = m.Dead ? m.LastSeenUTC : null,
                 IsCustom = m.IsCustom,
                 ZoneName = m.ZoneName,
+                Spiced = m.Spiced,
             }).ToList();
         }
         catch
