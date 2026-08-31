@@ -149,7 +149,6 @@ public sealed class MarkDetector
         if (territoryId == 0) return;
 
         var mapId = GetMapId(territoryId);
-        var scale = GetMapZoneScale(territoryId);
         var instance = GetCurrentInstance();
         var now = DateTime.UtcNow;
 
@@ -164,7 +163,7 @@ public sealed class MarkDetector
             if (_marks.TryGetValue(key, out var existing))
             {
                 existing.LastSeenUtc = now;
-                existing.MapPosition = ToMapCoordinate(mob.Position, scale);
+                existing.MapPosition = MapCoordinates.FromWorld(_dataManager, mapId, mob.Position.X, mob.Position.Z);
                 continue;
             }
 
@@ -177,7 +176,7 @@ public sealed class MarkDetector
                 TerritoryId = territoryId,
                 MapId = mapId,
                 Instance = instance,
-                MapPosition = ToMapCoordinate(mob.Position, scale),
+                MapPosition = MapCoordinates.FromWorld(_dataManager, mapId, mob.Position.X, mob.Position.Z),
                 Dead = false,
                 FirstSeenUtc = now,
                 LastSeenUtc = now,
@@ -210,7 +209,7 @@ public sealed class MarkDetector
             TerritoryId = territoryId,
             MapId = mapId,
             Instance = 0,
-            MapPosition = new Vector2(x, y),
+            MapPosition = MapCoordinates.FromWorld(_dataManager, mapId, x, y),
             Dead = false,
             FirstSeenUtc = DateTime.UtcNow,
             LastSeenUtc = DateTime.UtcNow,
@@ -241,15 +240,6 @@ public sealed class MarkDetector
     public uint GetMapId(uint territoryId) =>
         _dataManager.GetExcelSheet<TerritoryType>().GetRowOrDefault(territoryId)?.Map.RowId ?? 0;
 
-    // Everything is scale 100 except the Heavensward zones, which are 95.
-    private static float GetMapZoneScale(uint territoryId) =>
-        territoryId is >= 397 and <= 402 ? 95f : 100f;
-
-    private static Vector2 ToMapCoordinate(Vector3 worldPos, float scale) =>
-        new(ToMapCoordinate(worldPos.X, scale), ToMapCoordinate(worldPos.Z, scale));
-
-    private static float ToMapCoordinate(float pos, float scale) =>
-        2048f / scale + pos / 50f + 1f;
 
     private static unsafe uint GetCurrentInstance()
     {

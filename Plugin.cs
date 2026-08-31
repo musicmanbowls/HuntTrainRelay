@@ -787,7 +787,10 @@ public sealed class Plugin : IDalamudPlugin
         {
             if (showZones)
             {
-                var z = ExpansionData.Lookup(m.NameId)?.Location ?? "?";
+                // Must match exactly what the row draws below, or long custom
+                // flag zone names overflow into the mark name column.
+                var z = ExpansionData.Lookup(m.NameId)?.Location
+                        ?? (m.IsCustom ? m.ZoneName : "?");
                 zoneColWidth = Math.Max(zoneColWidth, ImGui.CalcTextSize($"「{z}」").X);
             }
             nameColWidth = Math.Max(nameColWidth,
