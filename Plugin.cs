@@ -2,6 +2,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
 using Dalamud.Interface;
 using Dalamud.Interface.Components;
+using Dalamud.Interface.Textures;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using System;
@@ -45,6 +46,11 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MarkDetector _detector;
     private readonly TeleportHelper _teleport;
     private readonly IGameGui _gameGui;
+    private readonly ITextureProvider _textureProvider;
+
+    // The game's own aetheryte crystal icon. ID confirmed from Umbra's source
+    // (Umbra.Game/src/Travel/TravelDestination.cs: IconAetheryte = 60453).
+    private const uint AetheryteIconId = 60453;
     private readonly HuntCounter _counter;
     private readonly IClientState _clientState;
 
@@ -85,6 +91,7 @@ public sealed class Plugin : IDalamudPlugin
         IClientState clientState,
         IDataManager dataManager,
         IGameGui gameGui,
+        ITextureProvider textureProvider,
         IPluginLog pluginLog)
     {
         _pluginInterface = pluginInterface;
@@ -98,6 +105,7 @@ public sealed class Plugin : IDalamudPlugin
 
         _ipc = new HuntHelperIpc(_pluginInterface);
         _gameGui = gameGui;
+        _textureProvider = textureProvider;
         _clientState = clientState;
         _huntTally = new HuntTallyIpc(_pluginInterface, _log);
         _detector = new MarkDetector(objectTable, clientState, dataManager);
@@ -456,8 +464,60 @@ public sealed class Plugin : IDalamudPlugin
     /// tab and the popout, so a conductor working from the popout alone still
     /// has everything they need mid-train.
     /// </summary>
+
+    /// <summary>
+    /// The actions that actually send something, or throw a train away. All
+    /// three require Shift to be held: they're irreversible enough that a
+    /// stray click mid-train is genuinely costly.
+    ///
+    /// Dimming and ignoring clicks manually rather than using ImGui's
+    /// BeginDisabled — same result, and it avoids an API this project has
+    /// deliberately steered clear of.
+    /// </summary>
+    private void DrawTrainFooter()
+    {
+        var armed = ImGui.GetIO().KeyShift;
+
+        if (!armed) ImGui.PushStyleVar(ImGuiStyleVar.Alpha, 0.45f);
+
+        if (ImGui.Button("Send Scouting Report") && armed)
+        {
+            _ = SendScoutingReportAsync();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("End Train Now") && armed)
+        {
+            _ = EndTrainNowAsync();
+        }
+
+        ImGui.SameLine();
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.35f, 0.35f, 1f));
+        var resetPressed = ImGui.Button("Reset");
+        ImGui.PopStyleColor();
+
+        if (resetPressed && armed)
+        {
+            _watcher.ResetNow();
+            _detector.Clear();
+            _currentMark = null;
+            _config.Flags.Clear();
+            _config.Save();
+            _lastPostResult = "Train reset — nothing was posted.";
+        }
+
+        if (!armed) ImGui.PopStyleVar();
+
+        if (!armed)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled("(hold Shift)");
+        }
+    }
+
     private void DrawTrainControls()
     {
+        // Row 1: scanning state.
         if (_config.ScanningPaused)
         {
             if (ImGuiComponents.IconButton(FontAwesomeIcon.Play))
@@ -478,6 +538,9 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ImGui.SameLine();
+        ImGui.TextDisabled(_config.ScanningPaused ? "Paused" : "Scanning");
+
+        // Row 2: tidy-up and navigation.
         if (ImGui.Button("Remove Dead"))
         {
             _detector.RemoveDead();
@@ -498,9 +561,7 @@ public sealed class Plugin : IDalamudPlugin
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Names the aetheryte nearest the next mark, and copies a line to your clipboard. No flag — see /htra");
 
-        ImGui.SameLine();
-        ImGui.TextDisabled(_config.ScanningPaused ? "Paused" : "Scanning");
-
+        // Row 3
         var tracking = _config.TrackingEnabled;
         if (ImGui.Checkbox("Tracking this train (records exact kill times)", ref tracking))
         {
@@ -508,7 +569,7 @@ public sealed class Plugin : IDalamudPlugin
             _config.Save();
         }
 
-        ImGui.SameLine();
+        // Row 4
         var hideDead = _config.HideDeadMarks;
         if (ImGui.Checkbox("Hide dead", ref hideDead))
         {
@@ -582,7 +643,10 @@ public sealed class Plugin : IDalamudPlugin
         if (_config.ShowMarkAge)
             nameColWidth += ImGui.CalcTextSize("  (00h 00m)").X;
 
-        var nameColumnX = leftPad + zoneColWidth + columnGap;
+        // The remove button now sits at the far left, so every column shifts
+        // right by its width.
+        const float removeColWidth = 22f;
+        var nameColumnX = leftPad + removeColWidth + zoneColWidth + columnGap;
         var buttonColumnX = nameColumnX + nameColWidth + columnGap;
 
         var mouseXInWindow = ImGui.GetMousePos().X - ImGui.GetWindowPos().X;
@@ -603,8 +667,21 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.SetCursorPosX(leftPad);
             ImGui.BeginGroup();
 
+            // Remove button on the far left, well away from teleport so it
+            // can't be hit by accident.
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(3, 0));
+            if (ImGui.SmallButton("x"))
+            {
+                toRemove = (mark.NameId, mark.Instance);
+            }
+            ImGui.PopStyleVar();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Remove this mark from the train");
+            ImGui.SetItemAllowOverlap();
+            ImGui.SameLine();
+
             ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, Vector2.Zero);
             // Highlighted while it's the row being dragged.
+            ImGui.SetCursorPosX(leftPad + removeColWidth);
             ImGui.Selectable(showZones ? $"「{zone}」" : string.Empty, _dragFromIndex == i, ImGuiSelectableFlags.None,
                 new Vector2(ImGui.GetWindowWidth(), rowHeight));
             ImGui.SetItemAllowOverlap();
@@ -629,20 +706,30 @@ public sealed class Plugin : IDalamudPlugin
 
             ImGui.SameLine();
             ImGui.SetCursorPosX(buttonColumnX);
-            if (ImGui.Button("tele", new Vector2(34f, rowHeight - 2)))
+            // The game's own aetheryte crystal, pulled from its texture sheets
+            // so it stays correct across patches and ships no assets. Falls back
+            // to a text button if the icon can't be resolved.
+            var iconSize = new Vector2(rowHeight - 4, rowHeight - 4);
+            var teleportPressed = false;
+
+            if (_textureProvider.TryGetFromGameIcon(new GameIconLookup(AetheryteIconId), out var iconTex)
+                && iconTex.TryGetWrap(out var iconWrap, out _))
+            {
+                teleportPressed = ImGui.ImageButton(iconWrap.Handle, iconSize);
+            }
+            else
+            {
+                teleportPressed = ImGui.Button("tele", new Vector2(34f, rowHeight - 2));
+            }
+
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Teleport to the nearest aetheryte");
+
+            if (teleportPressed)
             {
                 if (!_teleport.TeleportToNearest(mark.TerritoryId, mark.MapPosition))
                     _lastPostResult = _teleport.LastError;
                 else if (_config.TeleportAlsoFlags)
                     MapFlagHelper.FlagMark(_gameGui, mark);
-            }
-            ImGui.SetItemAllowOverlap();
-
-            ImGui.SameLine();
-            ImGui.SetCursorPosX(buttonColumnX + 40);
-            if (ImGui.Button("x", new Vector2(20f, rowHeight - 2)))
-            {
-                toRemove = (mark.NameId, mark.Instance);
             }
             ImGui.SetItemAllowOverlap();
 
@@ -861,15 +948,7 @@ public sealed class Plugin : IDalamudPlugin
             // separated from the controls above so neither gets hit by accident
             // while reaching for play/pause mid-train.
             ImGui.Separator();
-            if (ImGui.Button("Send Scouting Report"))
-            {
-                _ = SendScoutingReportAsync();
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("End Train Now"))
-            {
-                _ = EndTrainNowAsync();
-            }
+            DrawTrainFooter();
         }
         ImGui.End();
     }

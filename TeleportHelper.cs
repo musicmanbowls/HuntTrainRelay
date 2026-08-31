@@ -168,7 +168,18 @@ public sealed class TeleportHelper
 
         try
         {
-            _teleportIpc.InvokeFunc(nearest.AetheryteId, nearest.SubIndex);
+            // The gate returns whether Teleporter actually accepted the request.
+            // This used to be discarded, so a rejected teleport looked like a
+            // success and failed in complete silence — which is why the Dock
+            // Poga case gave no clue what was wrong.
+            var accepted = _teleportIpc.InvokeFunc(nearest.AetheryteId, nearest.SubIndex);
+            if (!accepted)
+            {
+                LastError = $"Teleporter refused \"{nearest.Name}\" (aetheryte {nearest.AetheryteId}" +
+                            $", sub {nearest.SubIndex}) — likely not attuned, or a bad ID in our table.";
+                return false;
+            }
+
             LastError = string.Empty;
             return true;
         }
