@@ -66,6 +66,11 @@ public sealed class Plugin : IDalamudPlugin
     private bool _counterPopoutVisible;
     private string _importCode = string.Empty;
     private string _customFlagLabel = string.Empty;
+
+    // Custom flags removed a few seconds after teleporting to them — instant
+    // removal was jarring mid-click.
+    private const double CustomFlagRemovalDelaySeconds = 5;
+    private readonly Dictionary<(uint NameId, uint Instance), DateTime> _pendingCustomRemovals = new();
     private int _blacklistExpansion;
     private int _blacklistZone;
     private int _blacklistAetheryte;
@@ -299,6 +304,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawUI()
     {
+        ProcessPendingCustomRemovals();
         UpdateAutoAdvance();
         DrawTrainPopout();
         DrawCounterPopout();
@@ -416,6 +422,31 @@ public sealed class Plugin : IDalamudPlugin
     /// a manual tick or Hunt Tally doing it automatically. Runs from the draw
     /// loop so it catches both without either path needing to know about it.
     /// </summary>
+    /// <summary>
+    /// Clears out custom flags a few seconds after the conductor teleported to
+    /// them. Marking them dead immediately on click was abrupt; this gives the
+    /// row a moment to be seen before it goes.
+    /// </summary>
+    private void ProcessPendingCustomRemovals()
+    {
+        if (_pendingCustomRemovals.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+        foreach (var (key, dueAt) in _pendingCustomRemovals.ToList())
+        {
+            if (now < dueAt) continue;
+
+            if (_detector.Marks.TryGetValue(key, out var mark) && mark.IsCustom)
+            {
+                mark.Dead = true;
+                mark.DeathObservedAtUtc = now;
+                _detector.Remove(key);
+            }
+
+            _pendingCustomRemovals.Remove(key);
+        }
+    }
+
     private void UpdateAutoAdvance()
     {
         if (!_config.AutoAdvance) return;
@@ -736,6 +767,15 @@ public sealed class Plugin : IDalamudPlugin
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Only hides them from this list — they stay in the train and in reports.");
+
+        // Row 5 — same setting as the one on the Settings tab, so the two
+        // always agree.
+        var spicingHere = _config.ShowSpicing;
+        if (ImGui.Checkbox("Show spicing markers", ref spicingHere))
+        {
+            _config.ShowSpicing = spicingHere;
+            _config.Save();
+        }
     }
 
     /// <summary>
@@ -909,17 +949,34 @@ public sealed class Plugin : IDalamudPlugin
                     // completing it, so tick it off and let auto-advance move
                     // on. Never done for real marks, which aren't dead just
                     // because someone travelled to them.
-                    if (mark.IsCustom && !mark.Dead)
+                    if (mark.IsCustom && !_pendingCustomRemovals.ContainsKey((mark.NameId, mark.Instance)))
                     {
-                        mark.Dead = true;
-                        mark.DeathObservedAtUtc = DateTime.UtcNow;
+                        _pendingCustomRemovals[(mark.NameId, mark.Instance)] =
+                            DateTime.UtcNow.AddSeconds(CustomFlagRemovalDelaySeconds);
                     }
                 }
             }
             ImGui.SetItemAllowOverlap();
 
+            if (_config.ShowSpicing)
+            {
+                ImGui.SameLine();
+                ImGui.SetCursorPosX(buttonColumnX + 40);
+                if (mark.Spiced) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.35f, 0.35f, 1f));
+                if (ImGuiComponents.IconButton(FontAwesomeIcon.PepperHot))
+                {
+                    mark.Spiced = !mark.Spiced;
+                }
+                if (mark.Spiced) ImGui.PopStyleColor();
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(mark.Spiced
+                        ? "Being spiced — click to unset"
+                        : "Mark as being spiced (prepped before the train arrives)");
+                ImGui.SetItemAllowOverlap();
+            }
+
             ImGui.SameLine();
-            ImGui.SetCursorPosX(buttonColumnX + 68);
+            ImGui.SetCursorPosX(buttonColumnX + (_config.ShowSpicing ? 100 : 68));
             ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 99);
             ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, Vector2.Zero);
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 3);
@@ -1531,6 +1588,14 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
+        var spicing = _config.ShowSpicing;
+        if (ImGui.Checkbox("Show spicing markers", ref spicing))
+        {
+            _config.ShowSpicing = spicing;
+            _config.Save();
+        }
+        ImGui.TextDisabled("A scout flagging a mark they'll prep before the train arrives. Off hides the icon entirely, and imported marks look ordinary.");
+
         var hideDeadSetting = _config.HideDeadMarks;
         if (ImGui.Checkbox("Hide dead marks in the train list", ref hideDeadSetting))
         {
@@ -1550,14 +1615,6 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-
-        var spicing = _config.ShowSpicing;
-        if (ImGui.Checkbox("Show spicing markers", ref spicing))
-        {
-            _config.ShowSpicing = spicing;
-            _config.Save();
-        }
-        ImGui.TextDisabled("A scout flagging a mark they'll prep before the train arrives. Off hides the icon entirely, and imported marks look ordinary.");
 
         var rowH = _config.TrainRowHeight;
         ImGui.SetNextItemWidth(120);
