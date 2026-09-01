@@ -124,6 +124,8 @@ public sealed class Plugin : IDalamudPlugin
         _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config, _detector);
         _counter = new HuntCounter(chatGui);
         _detector.MarkDetected += OnMarkDetected;
+        _watcher.PersistRequested += PersistTrain;
+        RestoreSavedTrain();
 
         _commandManager.AddHandler(ConfigCommand, new CommandInfo(OnCommand)
         {
@@ -294,6 +296,7 @@ public sealed class Plugin : IDalamudPlugin
             _watcher.ResetNow();
             _config.Flags.Clear();
             _config.Save();
+            ClearSavedTrain();
         }
         else
         {
@@ -518,6 +521,60 @@ public sealed class Plugin : IDalamudPlugin
             TeleportHelper.Blacklist.Add(id);
     }
 
+    /// <summary>
+    /// Writes the in-progress train to disk. Called on a timer and on unload,
+    /// so a crash costs at most a few seconds of kill times rather than the
+    /// whole train.
+    /// </summary>
+    private void PersistTrain()
+    {
+        var marks = _detector.ToPersisted();
+
+        // Nothing to save and nothing saved: don't churn the config file.
+        if (marks.Count == 0 && _config.SavedTrain.Count == 0) return;
+
+        _config.SavedTrain = marks;
+        _config.SavedTrainAtUtc = marks.Count > 0 ? DateTime.UtcNow : null;
+        _config.SavedCurrentNameId = _currentMark?.NameId;
+        _config.SavedCurrentInstance = _currentMark?.Instance;
+        _config.Save();
+    }
+
+    /// <summary>
+    /// Restores a train saved before a crash or reload. Deliberately never
+    /// expires it — the instruction is that it lives until Reset — but it does
+    /// say how old it is, so a stale one is obvious rather than silently
+    /// treated as current.
+    /// </summary>
+    private void RestoreSavedTrain()
+    {
+        if (_config.SavedTrain.Count == 0) return;
+
+        _detector.LoadPersisted(_config.SavedTrain);
+
+        if (_config.SavedCurrentNameId is { } nameId && _config.SavedCurrentInstance is { } instance)
+            _currentMark = (nameId, instance);
+
+        var age = _config.SavedTrainAtUtc is { } at
+            ? FormatAge(at)
+            : "unknown age";
+
+        var dead = _config.SavedTrain.Count(m => m.Dead);
+        _chatGui.Print(
+            $"[Hunt Train Relay] Restored train from {age} ago — " +
+            $"{_config.SavedTrain.Count} marks, {dead} dead. Use Reset if this is stale.");
+    }
+
+    /// <summary>Drops the saved train. Only Reset and a posted train do this.</summary>
+    private void ClearSavedTrain()
+    {
+        _config.SavedTrain.Clear();
+        _config.SavedTrainAtUtc = null;
+        _config.SavedCurrentNameId = null;
+        _config.SavedCurrentInstance = null;
+        _config.Save();
+    }
+
     private void ReportProblem(string message)
     {
         _lastPostResult = message;
@@ -563,6 +620,7 @@ public sealed class Plugin : IDalamudPlugin
             _currentMark = null;
             _config.Flags.Clear();
             _config.Save();
+            ClearSavedTrain();
             _lastPostResult = "Train reset — nothing was posted.";
         }
 
@@ -1290,8 +1348,11 @@ public sealed class Plugin : IDalamudPlugin
         if (ImGui.Button("Reset train tracking now"))
         {
             _watcher.ResetNow();
+            _detector.Clear();
+            _currentMark = null;
             _config.Flags.Clear();
             _config.Save();
+            ClearSavedTrain();
         }
         ImGui.TextDisabled("Clears tracking and S-rank watches without posting anything — use if you need to abandon a train.");
 
@@ -1762,6 +1823,11 @@ public sealed class Plugin : IDalamudPlugin
         _zoneReminder.Dispose();
         _counter.Dispose();
         _detector.MarkDetected -= OnMarkDetected;
+        _watcher.PersistRequested -= PersistTrain;
+
+        // One last write, so anything since the last periodic save survives a
+        // clean unload too.
+        PersistTrain();
         _pluginInterface.UiBuilder.Draw -= DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi -= OnOpenConfigUi;
         _commandManager.RemoveHandler(ConfigCommand);

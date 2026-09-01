@@ -51,6 +51,14 @@ public class TrainWatcher : IDisposable
 
     private double _secondsSinceLastPoll;
     private double _secondsSinceConnectAttempt;
+    private double _secondsSinceSave;
+
+    /// <summary>
+    /// Raised periodically so the in-progress train can be written to disk.
+    /// Fires regardless of whether tracking is on, since kill times and the
+    /// pointer are worth keeping either way.
+    /// </summary>
+    public event Action? PersistRequested;
 
     public string LastStatus { get; private set; } = "Idle.";
 
@@ -101,6 +109,15 @@ public class TrainWatcher : IDisposable
         // load order isn't guaranteed, so if Hunt Tally came up after us, the
         // one attempt at construction would otherwise never be retried until
         // someone happened to enable tracking.
+        // Periodic save so a crash mid-train doesn't lose kill times. Ten
+        // seconds keeps writes cheap while bounding the worst case loss.
+        _secondsSinceSave += framework.UpdateDelta.TotalSeconds;
+        if (_secondsSinceSave >= 10)
+        {
+            _secondsSinceSave = 0;
+            PersistRequested?.Invoke();
+        }
+
         if (!_huntTally.Connected)
         {
             _secondsSinceConnectAttempt += framework.UpdateDelta.TotalSeconds;

@@ -34,6 +34,32 @@ public class FlagEntry
     public float Y { get; set; }
 }
 
+/// <summary>
+/// A train row as written to disk, so a crash or reload doesn't lose kill
+/// times. Deliberately its own type rather than reusing the export shape:
+/// this one keeps ordering and the exact observed death time, which the
+/// interchange format has no reason to carry.
+/// </summary>
+[Serializable]
+public class PersistedMark
+{
+    public string Name { get; set; } = string.Empty;
+    public uint NameId { get; set; }
+    public uint TerritoryId { get; set; }
+    public uint MapId { get; set; }
+    public uint Instance { get; set; }
+    public float X { get; set; }
+    public float Y { get; set; }
+    public bool Dead { get; set; }
+    public DateTime FirstSeenUtc { get; set; }
+    public DateTime LastSeenUtc { get; set; }
+    public DateTime? DeathObservedAtUtc { get; set; }
+    public int Order { get; set; }
+    public bool IsCustom { get; set; }
+    public string ZoneName { get; set; } = string.Empty;
+    public bool Spiced { get; set; }
+}
+
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
@@ -146,6 +172,19 @@ public class Configuration : IPluginConfiguration
     /// use it can turn it off and imported marks look completely ordinary.
     /// </summary>
     public bool ShowSpicing { get; set; } = true;
+
+    /// <summary>
+    /// The in-progress train, saved so a crash mid-train doesn't lose kill
+    /// times. Cleared only by Reset or a successful End Train Now.
+    /// </summary>
+    public List<PersistedMark> SavedTrain { get; set; } = new();
+
+    /// <summary>When the saved train was last written, so its age can be shown.</summary>
+    public DateTime? SavedTrainAtUtc { get; set; }
+
+    /// <summary>The current-mark pointer, saved alongside the train.</summary>
+    public uint? SavedCurrentNameId { get; set; }
+    public uint? SavedCurrentInstance { get; set; }
 
     /// <summary>Height of a train list row, in pixels.</summary>
     public int TrainRowHeight { get; set; } = 22;

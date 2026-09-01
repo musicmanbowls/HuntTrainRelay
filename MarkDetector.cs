@@ -240,6 +240,63 @@ public sealed class MarkDetector
         }
     }
 
+    /// <summary>Snapshot of the whole train for saving to disk.</summary>
+    public List<PersistedMark> ToPersisted() =>
+        Ordered().Select(m => new PersistedMark
+        {
+            Name = m.Name,
+            NameId = m.NameId,
+            TerritoryId = m.TerritoryId,
+            MapId = m.MapId,
+            Instance = m.Instance,
+            X = m.MapPosition.X,
+            Y = m.MapPosition.Y,
+            Dead = m.Dead,
+            FirstSeenUtc = m.FirstSeenUtc,
+            LastSeenUtc = m.LastSeenUtc,
+            DeathObservedAtUtc = m.DeathObservedAtUtc,
+            Order = m.Order,
+            IsCustom = m.IsCustom,
+            ZoneName = m.ZoneName,
+            Spiced = m.Spiced,
+        }).ToList();
+
+    /// <summary>
+    /// Restores a saved train, replacing whatever's currently held. Custom
+    /// flags keep their synthetic ids, and the id counter is moved below the
+    /// lowest one so new flags can't collide with restored ones.
+    /// </summary>
+    public void LoadPersisted(List<PersistedMark> saved)
+    {
+        _marks.Clear();
+        _nextOrder = 0;
+
+        foreach (var p in saved)
+        {
+            var mark = new DetectedMark
+            {
+                Name = p.Name,
+                NameId = p.NameId,
+                TerritoryId = p.TerritoryId,
+                MapId = p.MapId,
+                Instance = p.Instance,
+                MapPosition = new Vector2(p.X, p.Y),
+                Dead = p.Dead,
+                FirstSeenUtc = p.FirstSeenUtc,
+                LastSeenUtc = p.LastSeenUtc,
+                DeathObservedAtUtc = p.DeathObservedAtUtc,
+                Order = p.Order,
+                IsCustom = p.IsCustom,
+                ZoneName = p.ZoneName,
+                Spiced = p.Spiced,
+            };
+
+            _marks[(mark.NameId, mark.Instance)] = mark;
+            if (mark.Order >= _nextOrder) _nextOrder = mark.Order + 1;
+            if (mark.IsCustom && mark.NameId <= _nextCustomId) _nextCustomId = mark.NameId - 1;
+        }
+    }
+
     public uint GetMapId(uint territoryId) =>
         _dataManager.GetExcelSheet<TerritoryType>().GetRowOrDefault(territoryId)?.Map.RowId ?? 0;
 
