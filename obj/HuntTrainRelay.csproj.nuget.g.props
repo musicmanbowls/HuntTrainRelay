@@ -12,6 +12,72 @@
   <ItemGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
     <SourceRoot Include="C:\Users\chris\.nuget\packages\" />
   </ItemGroup>
+  <ItemGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Content Include="$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\HorizontalGradient_WhiteToAlpha.png" Condition="Exists('$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\HorizontalGradient_WhiteToAlpha.png')">
+      <NuGetPackageId>KamiToolKit</NuGetPackageId>
+      <NuGetPackageVersion>2.0.23</NuGetPackageVersion>
+      <NuGetItemType>Content</NuGetItemType>
+      <Pack>false</Pack>
+      <Private>False</Private>
+      <Link>Assets\HorizontalGradient_WhiteToAlpha.png</Link>
+    </Content>
+    <Content Include="$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\VerticalGradient_AlphaToBlack.png" Condition="Exists('$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\VerticalGradient_AlphaToBlack.png')">
+      <NuGetPackageId>KamiToolKit</NuGetPackageId>
+      <NuGetPackageVersion>2.0.23</NuGetPackageVersion>
+      <NuGetItemType>Content</NuGetItemType>
+      <Pack>false</Pack>
+      <Private>False</Private>
+      <Link>Assets\VerticalGradient_AlphaToBlack.png</Link>
+    </Content>
+    <Content Include="$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\VerticalGradient_WhiteToAlpha.png" Condition="Exists('$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\VerticalGradient_WhiteToAlpha.png')">
+      <NuGetPackageId>KamiToolKit</NuGetPackageId>
+      <NuGetPackageVersion>2.0.23</NuGetPackageVersion>
+      <NuGetItemType>Content</NuGetItemType>
+      <Pack>false</Pack>
+      <Private>False</Private>
+      <Link>Assets\VerticalGradient_WhiteToAlpha.png</Link>
+    </Content>
+    <Content Include="$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\alpha_background.png" Condition="Exists('$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\alpha_background.png')">
+      <NuGetPackageId>KamiToolKit</NuGetPackageId>
+      <NuGetPackageVersion>2.0.23</NuGetPackageVersion>
+      <NuGetItemType>Content</NuGetItemType>
+      <Pack>false</Pack>
+      <Private>False</Private>
+      <Link>Assets\alpha_background.png</Link>
+    </Content>
+    <Content Include="$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\alpha_selector.png" Condition="Exists('$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\alpha_selector.png')">
+      <NuGetPackageId>KamiToolKit</NuGetPackageId>
+      <NuGetPackageVersion>2.0.23</NuGetPackageVersion>
+      <NuGetItemType>Content</NuGetItemType>
+      <Pack>false</Pack>
+      <Private>False</Private>
+      <Link>Assets\alpha_selector.png</Link>
+    </Content>
+    <Content Include="$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\color_ring.png" Condition="Exists('$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\color_ring.png')">
+      <NuGetPackageId>KamiToolKit</NuGetPackageId>
+      <NuGetPackageVersion>2.0.23</NuGetPackageVersion>
+      <NuGetItemType>Content</NuGetItemType>
+      <Pack>false</Pack>
+      <Private>False</Private>
+      <Link>Assets\color_ring.png</Link>
+    </Content>
+    <Content Include="$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\color_ring_selector.png" Condition="Exists('$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\color_ring_selector.png')">
+      <NuGetPackageId>KamiToolKit</NuGetPackageId>
+      <NuGetPackageVersion>2.0.23</NuGetPackageVersion>
+      <NuGetItemType>Content</NuGetItemType>
+      <Pack>false</Pack>
+      <Private>False</Private>
+      <Link>Assets\color_ring_selector.png</Link>
+    </Content>
+    <Content Include="$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\color_select_dot.png" Condition="Exists('$(NuGetPackageRoot)kamitoolkit\2.0.23\contentFiles\any\net10.0-windows7.0\Assets\color_select_dot.png')">
+      <NuGetPackageId>KamiToolKit</NuGetPackageId>
+      <NuGetPackageVersion>2.0.23</NuGetPackageVersion>
+      <NuGetItemType>Content</NuGetItemType>
+      <Pack>false</Pack>
+      <Private>False</Private>
+      <Link>Assets\color_select_dot.png</Link>
+    </Content>
+  </ItemGroup>
   <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
     <Import Project="$(NuGetPackageRoot)dotnet.reproduciblebuilds\1.2.39\buildTransitive\DotNet.ReproducibleBuilds.props" Condition="Exists('$(NuGetPackageRoot)dotnet.reproduciblebuilds\1.2.39\buildTransitive\DotNet.ReproducibleBuilds.props')" />
     <Import Project="$(NuGetPackageRoot)dalamudpackager\15.0.0\build\DalamudPackager.props" Condition="Exists('$(NuGetPackageRoot)dalamudpackager\15.0.0\build\DalamudPackager.props')" />

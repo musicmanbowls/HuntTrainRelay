@@ -5,7 +5,7 @@
   },
   "projects": {
     "E:\\GitProjects\\HuntTrainRelay\\HuntTrainRelay.csproj": {
-      "version": "1.15.1",
+      "version": "1.16.0",
       "restore": {
         "projectUniqueName": "E:\\GitProjects\\HuntTrainRelay\\HuntTrainRelay.csproj",
         "projectName": "HuntTrainRelay",
@@ -57,6 +57,10 @@
               "suppressParent": "All",
               "target": "Package",
               "version": "[1.2.39, )"
+            },
+            "KamiToolKit": {
+              "target": "Package",
+              "version": "[2.0.23, )"
             }
           },
           "imports": [

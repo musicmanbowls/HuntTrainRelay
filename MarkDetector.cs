@@ -56,11 +56,34 @@ public class DetectedMark
 /// (img02/HuntHelper, MIT licensed): every zone uses a scale of 100 except the
 /// Heavensward zones (territory 397-402) which use 95.
 /// </summary>
+/// <summary>
+/// Any mark spotted while scanning, of any rank. Deliberately separate from
+/// DetectedMark and from the train: sightings are "what I have seen", while
+/// the train is "what I am recording". A-ranks appear in BOTH when recording
+/// is on, and only here when it's paused — which is what lets the map and the
+/// detection echo keep working with the train paused.
+/// </summary>
+public class OtherRankSighting
+{
+    public string Name = string.Empty;
+    public uint NameId;
+    public HuntRank Rank;
+    public uint TerritoryId;
+    public uint MapId;
+    public uint Instance;
+    public Vector2 MapPosition;
+    public DateTime LastSeenUtc;
+
+    /// <summary>Zone name, resolved once at first sighting.</summary>
+    public string ZoneName = string.Empty;
+}
+
 public sealed class MarkDetector
 {
     private readonly IObjectTable _objectTable;
     private readonly IClientState _clientState;
     private readonly IDataManager _dataManager;
+    private readonly Configuration _config;
 
     private readonly Dictionary<(uint NameId, uint Instance), DetectedMark> _marks = new();
     private int _nextOrder;
@@ -69,21 +92,34 @@ public sealed class MarkDetector
     // never collide with a real BNpcName row id.
     private uint _nextCustomId = uint.MaxValue;
 
+    private readonly Dictionary<(uint NameId, uint Instance), OtherRankSighting> _otherRanks = new();
+
+    /// <summary>
+    /// Every mark seen, of every rank. Independent of the train, and populated
+    /// whether or not recording is active.
+    /// </summary>
+    public IReadOnlyDictionary<(uint NameId, uint Instance), OtherRankSighting> OtherRanks => _otherRanks;
+
+    /// <summary>Raised the first time any mark is spotted, regardless of rank.</summary>
+    public event Action<OtherRankSighting>? OtherRankDetected;
+
     /// <summary>Raised once when a mark is first picked up by scanning.</summary>
     public event Action<DetectedMark>? MarkDetected;
 
     public IReadOnlyDictionary<(uint NameId, uint Instance), DetectedMark> Marks => _marks;
 
-    public MarkDetector(IObjectTable objectTable, IClientState clientState, IDataManager dataManager)
+    public MarkDetector(IObjectTable objectTable, IClientState clientState, IDataManager dataManager, Configuration config)
     {
         _objectTable = objectTable;
         _clientState = clientState;
         _dataManager = dataManager;
+        _config = config;
     }
 
     public void Clear()
     {
         _marks.Clear();
+        _otherRanks.Clear();
         _nextOrder = 0;
     }
 
@@ -155,12 +191,34 @@ public sealed class MarkDetector
         var instance = GetCurrentInstance();
         var now = DateTime.UtcNow;
 
+        // A mark that's disappeared from somewhere we're standing has almost
+        // certainly been killed — drop it so its dot goes back to grey.
+        var player = _objectTable.LocalPlayer;
+        if (player != null)
+        {
+            var playerMapPos = MapCoordinates.FromWorld(_dataManager, mapId, player.Position.X, player.Position.Z);
+            // One scan interval plus a little slack: any shorter and a mark
+            // simply missed by one pass would be wrongly declared dead.
+            var stale = Math.Max(2, _config.PollIntervalSeconds) + 1;
+            ExpireNearbySightings(playerMapPos, territoryId, instance, stale);
+        }
+
         foreach (var obj in _objectTable)
         {
             if (obj is not Dalamud.Game.ClientState.Objects.Types.IBattleNpc mob) continue;
 
             var info = ExpansionData.Lookup(mob.NameId);
-            if (info == null) continue; // not a tracked A-rank
+            if (info == null)
+            {
+                // B or S rank: worth showing on the map, never joins the train.
+                TrackSighting(mob, territoryId, mapId, instance, now, null);
+                continue;
+            }
+
+            // An A-rank is always recorded as a sighting, so the map and the
+            // detection echo work even with train recording paused. Whether it
+            // also joins the train is decided below.
+            TrackSighting(mob, territoryId, mapId, instance, now, HuntRank.A);
 
             var key = (mob.NameId, instance);
             if (_marks.TryGetValue(key, out var existing))
@@ -223,6 +281,78 @@ public sealed class MarkDetector
 
         _marks[(mark.NameId, mark.Instance)] = mark;
         return mark;
+    }
+
+    private void TrackSighting(
+        Dalamud.Game.ClientState.Objects.Types.IBattleNpc mob,
+        uint territoryId, uint mapId, uint instance, DateTime now, HuntRank? knownRank)
+    {
+        HuntRank rank;
+        if (knownRank is { } r)
+        {
+            rank = r;
+        }
+        else
+        {
+            var other = OtherRankData.Lookup(mob.NameId);
+            if (other == null) return;
+            rank = other.Rank;
+        }
+
+        var key = (mob.NameId, instance);
+        if (_otherRanks.TryGetValue(key, out var existing))
+        {
+            existing.LastSeenUtc = now;
+            existing.MapPosition = MapCoordinates.FromWorld(_dataManager, mapId, mob.Position.X, mob.Position.Z);
+            return;
+        }
+
+        var sighting = new OtherRankSighting
+        {
+            Name = mob.Name.TextValue,
+            NameId = mob.NameId,
+            Rank = rank,
+            TerritoryId = territoryId,
+            MapId = mapId,
+            Instance = instance,
+            MapPosition = MapCoordinates.FromWorld(_dataManager, mapId, mob.Position.X, mob.Position.Z),
+            LastSeenUtc = now,
+            ZoneName = GetZoneName(territoryId),
+        };
+
+        _otherRanks[key] = sighting;
+        OtherRankDetected?.Invoke(sighting);
+    }
+
+    /// <summary>Clears all sightings.</summary>
+    public void ClearOtherRanks() => _otherRanks.Clear();
+
+    /// <summary>Forgets one sighting, e.g. when a mark is known to be dead.</summary>
+    public void RemoveSighting(uint nameId, uint instance) => _otherRanks.Remove((nameId, instance));
+
+    /// <summary>
+    /// Drops sightings for marks that have gone from a spot we're still
+    /// standing next to — almost always because they were just killed.
+    ///
+    /// Distance matters here: a sighting going stale while we're far away just
+    /// means we flew off, and that's exactly the scouting information we want
+    /// to keep. Only a mark missing from somewhere we can currently see counts
+    /// as gone.
+    /// </summary>
+    public void ExpireNearbySightings(Vector2 playerMapPos, uint territoryId, uint instance, double staleSeconds)
+    {
+        const float visibleMapUnits = 3f; // roughly the game's render range
+
+        var now = DateTime.UtcNow;
+        foreach (var (key, sighting) in _otherRanks.ToList())
+        {
+            if (sighting.TerritoryId != territoryId) continue;
+            if (sighting.Instance != instance) continue;
+            if ((now - sighting.LastSeenUtc).TotalSeconds < staleSeconds) continue;
+            if (Vector2.Distance(sighting.MapPosition, playerMapPos) > visibleMapUnits) continue;
+
+            _otherRanks.Remove(key);
+        }
     }
 
     /// <summary>Zone name straight from the game's own data, so it's always correct.</summary>

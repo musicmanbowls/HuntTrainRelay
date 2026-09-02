@@ -1,11 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "sn3FniW/cws=",
+  "dgSpecHash": "1kLYbkLW/OQ=",
   "success": true,
   "projectFilePath": "E:\\GitProjects\\HuntTrainRelay\\HuntTrainRelay.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\chris\\.nuget\\packages\\dalamudpackager\\15.0.0\\dalamudpackager.15.0.0.nupkg.sha512",
-    "C:\\Users\\chris\\.nuget\\packages\\dotnet.reproduciblebuilds\\1.2.39\\dotnet.reproduciblebuilds.1.2.39.nupkg.sha512"
+    "C:\\Users\\chris\\.nuget\\packages\\dotnet.reproduciblebuilds\\1.2.39\\dotnet.reproduciblebuilds.1.2.39.nupkg.sha512",
+    "C:\\Users\\chris\\.nuget\\packages\\kamitoolkit\\2.0.23\\kamitoolkit.2.0.23.nupkg.sha512"
   ],
   "logs": []
 }

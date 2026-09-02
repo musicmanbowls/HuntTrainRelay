@@ -1,9 +1,11 @@
 E:\GitProjects\HuntTrainRelay\bin\Release\HuntTrainRelay.deps.json
 E:\GitProjects\HuntTrainRelay\bin\Release\HuntTrainRelay.dll
+E:\GitProjects\HuntTrainRelay\bin\Release\KamiToolKit.dll
 E:\GitProjects\HuntTrainRelay\obj\Release\HuntTrainRelay.csproj.AssemblyReference.cache
 E:\GitProjects\HuntTrainRelay\obj\Release\HuntTrainRelay.GeneratedMSBuildEditorConfig.editorconfig
 E:\GitProjects\HuntTrainRelay\obj\Release\HuntTrainRelay.AssemblyInfoInputs.cache
 E:\GitProjects\HuntTrainRelay\obj\Release\HuntTrainRelay.AssemblyInfo.cs
 E:\GitProjects\HuntTrainRelay\obj\Release\HuntTrainRelay.csproj.CoreCompileInputs.cache
 E:\GitProjects\HuntTrainRelay\obj\Release\HuntTrainRelay.sourcelink.json
+E:\GitProjects\HuntTrainRelay\obj\Release\HuntTrai.F643F7EF.Up2Date
 E:\GitProjects\HuntTrainRelay\obj\Release\HuntTrainRelay.dll

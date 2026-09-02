@@ -141,6 +141,11 @@ public class Configuration : IPluginConfiguration
     /// <summary>Echo to chat each time a new A-rank is picked up while scouting.</summary>
     public bool EchoOnDetection { get; set; } = false;
 
+    /// <summary>Which ranks the detection echo covers. B is the noisy one.</summary>
+    public bool EchoBRanks { get; set; } = false;
+    public bool EchoARanks { get; set; } = true;
+    public bool EchoSRanks { get; set; } = true;
+
     /// <summary>Teleporting to a mark also drops the map flag on it.</summary>
     public bool TeleportAlsoFlags { get; set; } = true;
 
@@ -186,6 +191,31 @@ public class Configuration : IPluginConfiguration
     /// use it can turn it off and imported marks look completely ordinary.
     /// </summary>
     public bool ShowSpicing { get; set; } = true;
+
+    /// <summary>
+    /// Draw A-rank spawn points on the real in-game map. Currently a proof of
+    /// concept covering Urqopacha only, and the one feature here that depends
+    /// on a third-party library, so it's off by default.
+    /// </summary>
+    public bool ShowSpawnPointsOnMap { get; set; } = false;
+
+    /// <summary>
+    /// Map icon ids for spawn points. Configurable because there's no reliable
+    /// published list of "coloured dot" icons — far quicker to try numbers
+    /// in-game than to rebuild for each guess. Defaults are ids verified from
+    /// other plugins: a generic pin, and the bronze/silver/gold markers, which
+    /// at least differ visibly.
+    /// </summary>
+    /// <summary>Which ranks' spawn points to draw. ARR zones have up to sixty.</summary>
+    public bool ShowARankPoints { get; set; } = true;
+    public bool ShowBRankPoints { get; set; } = false;
+    public bool ShowSRankPoints { get; set; } = true;
+
+    /// <summary>Dot size in pixels. KamiToolKit's default marker is 32x32.</summary>
+    public float SpawnDotSize { get; set; } = 16f;
+
+    /// <summary>How close (in map units) a mark must be to count as "at" a spawn point.</summary>
+    public float SpawnPointMatchRadius { get; set; } = 2.5f;
 
     /// <summary>
     /// Count only kills you personally landed ("You defeat the X") rather than

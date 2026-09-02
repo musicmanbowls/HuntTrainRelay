@@ -37,6 +37,38 @@ public static class MapCoordinates
         }
     }
 
+    /// <summary>
+    /// The inverse: map coordinates back to a world position. Needed because
+    /// Hunt Helper's spawn point data is stored in map coordinates, while the
+    /// map overlay wants world positions.
+    /// </summary>
+    public static Vector2 ToWorld(IDataManager dataManager, uint mapId, float mapX, float mapY)
+    {
+        try
+        {
+            var map = dataManager.GetExcelSheet<Map>().GetRowOrDefault(mapId);
+            if (map == null) return new Vector2(mapX, mapY);
+
+            var scale = map.Value.SizeFactor / 100f;
+            if (scale <= 0f) scale = 1f;
+
+            return new Vector2(
+                ConvertBack(mapX, map.Value.OffsetX, scale),
+                ConvertBack(mapY, map.Value.OffsetY, scale));
+        }
+        catch
+        {
+            return new Vector2(mapX, mapY);
+        }
+    }
+
+    private static float ConvertBack(float mapValue, float offset, float scale)
+    {
+        // Inverse of Convert below.
+        var t = (mapValue - 1f) * 2048f * scale / 41f;
+        return (t - 1024f) / scale - offset;
+    }
+
     private static float Convert(float world, float offset, float scale)
     {
         var value = (41f / scale) * ((world + offset) * scale + 1024f) / 2048f + 1f;

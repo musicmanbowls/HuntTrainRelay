@@ -52,6 +52,7 @@ public class TrainWatcher : IDisposable
     private double _secondsSinceLastPoll;
     private double _secondsSinceConnectAttempt;
     private double _secondsSinceSave;
+    private double _secondsSinceScan;
 
     /// <summary>
     /// Raised periodically so the in-progress train can be written to disk.
@@ -128,6 +129,23 @@ public class TrainWatcher : IDisposable
             }
         }
 
+        // Detection runs regardless of tracking: the map wants to know about
+        // B, A and S ranks all the time. Only whether A-ranks get RECORDED into
+        // the train is gated by tracking and the pause button.
+        _secondsSinceScan += framework.UpdateDelta.TotalSeconds;
+        if (_secondsSinceScan >= Math.Max(1, _config.PollIntervalSeconds))
+        {
+            _secondsSinceScan = 0;
+            try
+            {
+                _detector.Scan(recordNew: _config.TrackingEnabled && !_config.ScanningPaused);
+            }
+            catch (Exception ex)
+            {
+                LastStatus = $"Detection error: {ex.Message}";
+            }
+        }
+
         if (!_config.TrackingEnabled) return;
 
         _secondsSinceLastPoll += framework.UpdateDelta.TotalSeconds;
@@ -155,17 +173,6 @@ public class TrainWatcher : IDisposable
 
     private void Poll()
     {
-        // Always scan with our own detector, even when Hunt Helper is the active
-        // source — that's what makes side-by-side comparison possible.
-        try
-        {
-            _detector.Scan(recordNew: !_config.ScanningPaused);
-        }
-        catch (Exception ex)
-        {
-            LastStatus = $"Own detection error: {ex.Message}";
-        }
-
         // Apply Hunt Tally kills BEFORE anything that depends on Hunt Helper.
         // This used to sit further down and was skipped entirely whenever Hunt
         // Helper wasn't loaded or its list was empty — which is the normal case
@@ -293,7 +300,14 @@ public class TrainWatcher : IDisposable
                 matched = true;
             }
 
-            if (matched) AutoMarkedCount++;
+            if (matched)
+            {
+                AutoMarkedCount++;
+
+                // Its dot should go back to grey immediately rather than
+                // waiting for the proximity check to notice it's gone.
+                _detector.RemoveSighting(kill.NameId, kill.InstanceId);
+            }
         }
     }
 }

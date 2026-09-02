@@ -3,6 +3,7 @@ using Dalamud.Game.Command;
 using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Textures;
+using KamiToolKit;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using System;
@@ -21,6 +22,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string TrainCommand = "/htrt";
     private const string CounterCommand = "/htrc";
     private const string NextAetheryteCommand = "/htra";
+    private const string MapCommand = "/htrm";
     private const int MaxWebhooks = 5;
     private const int MaxAdditionalScouts = 3;
 
@@ -53,6 +55,7 @@ public sealed class Plugin : IDalamudPlugin
     private const uint AetheryteIconId = 60453;
     private readonly HuntCounter _counter;
     private readonly WorldData _worldData;
+    private readonly HuntMapOverlay _mapOverlay;
     private int _counterDcIndex;
     private int _counterWorldIndex;
 
@@ -73,6 +76,7 @@ public sealed class Plugin : IDalamudPlugin
     private bool _configWindowVisible;
     private bool _trainPopoutVisible;
     private bool _counterPopoutVisible;
+    private bool _mapPopoutVisible;
     private string _importCode = string.Empty;
     private string _customFlagLabel = string.Empty;
 
@@ -110,6 +114,7 @@ public sealed class Plugin : IDalamudPlugin
         IDataManager dataManager,
         IGameGui gameGui,
         ITextureProvider textureProvider,
+        IAddonLifecycle addonLifecycle,
         IPluginLog pluginLog)
     {
         _pluginInterface = pluginInterface;
@@ -126,14 +131,28 @@ public sealed class Plugin : IDalamudPlugin
         _textureProvider = textureProvider;
         _clientState = clientState;
         _huntTally = new HuntTallyIpc(_pluginInterface, _log);
-        _detector = new MarkDetector(objectTable, clientState, dataManager);
+        _detector = new MarkDetector(objectTable, clientState, dataManager, _config);
         _teleport = new TeleportHelper(_pluginInterface, _log, dataManager);
         SyncBlacklist();
         _watcher = new TrainWatcher(framework, _ipc, _huntTally, _detector, _config);
         _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config, _detector);
         _counter = new HuntCounter(chatGui, objectTable, _config);
         _worldData = new WorldData(dataManager);
-        _detector.MarkDetected += OnMarkDetected;
+
+        // KamiToolKit needs one-time initialisation before any of its
+        // controllers can be enabled — without it, AddonController.Enable()
+        // throws a null reference on every frame.
+        try
+        {
+            KamiToolKitLibrary.Initialize(_pluginInterface, "Hunt Train Relay");
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "KamiToolKit failed to initialise; the map overlay will stay off.");
+        }
+
+        _mapOverlay = new HuntMapOverlay(framework, clientState, dataManager, addonLifecycle, _log, _config, _detector, _pluginInterface);
+        _detector.OtherRankDetected += OnSightingDetected;
         _watcher.PersistRequested += PersistTrain;
         RestoreSavedTrain();
 
@@ -157,6 +176,11 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Name the closest aetheryte to the next mark in the train.",
         });
 
+        _commandManager.AddHandler(MapCommand, new CommandInfo(OnMapCommand)
+        {
+            HelpMessage = "Open the map dot filters.",
+        });
+
         _pluginInterface.UiBuilder.Draw += DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi += OnOpenConfigUi;
     }
@@ -165,10 +189,19 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnTrainCommand(string command, string args) => _trainPopoutVisible = true;
 
-    private void OnMarkDetected(DetectedMark mark)
+    private void OnSightingDetected(OtherRankSighting sighting)
     {
-        if (_config.EchoOnDetection)
-            TrainChatEcho.SendDetected(_chatGui, mark);
+        if (!_config.EchoOnDetection) return;
+
+        var wanted = sighting.Rank switch
+        {
+            HuntRank.B => _config.EchoBRanks,
+            HuntRank.A => _config.EchoARanks,
+            _ => _config.EchoSRanks,
+        };
+        if (!wanted) return;
+
+        TrainChatEcho.SendSighting(_chatGui, sighting);
     }
 
     /// <summary>Compact "how long ago was this last seen" label, e.g. 5m / 1h 12m.</summary>
@@ -181,6 +214,8 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     private void OnCounterCommand(string command, string args) => _counterPopoutVisible = true;
+
+    private void OnMapCommand(string command, string args) => _mapPopoutVisible = true;
 
     private void OnOpenConfigUi() => _configWindowVisible = true;
 
@@ -329,6 +364,7 @@ public sealed class Plugin : IDalamudPlugin
         UpdateAutoAdvance();
         DrawTrainPopout();
         DrawCounterPopout();
+        DrawMapPopout();
 
         if (!_configWindowVisible) return;
 
@@ -764,6 +800,53 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    /// <summary>
+    /// A small always-available window for the map dot filters, so they can be
+    /// flipped mid-scout without opening Settings.
+    /// </summary>
+    private void DrawMapPopout()
+    {
+        if (!_mapPopoutVisible) return;
+
+        ImGui.SetNextWindowSize(new Vector2(230, 170), ImGuiCond.FirstUseEver);
+        if (ImGui.Begin("Hunt Map", ref _mapPopoutVisible))
+        {
+            var enabled = _config.ShowSpawnPointsOnMap;
+            if (ImGui.Checkbox("Show spawn points", ref enabled))
+            {
+                _config.ShowSpawnPointsOnMap = enabled;
+                _config.Save();
+            }
+
+            ImGui.Separator();
+
+            var showB = _config.ShowBRankPoints;
+            if (ImGui.Checkbox("B ranks", ref showB))
+            {
+                _config.ShowBRankPoints = showB;
+                _config.Save();
+            }
+
+            var showA = _config.ShowARankPoints;
+            if (ImGui.Checkbox("A ranks", ref showA))
+            {
+                _config.ShowARankPoints = showA;
+                _config.Save();
+            }
+
+            var showS = _config.ShowSRankPoints;
+            if (ImGui.Checkbox("S ranks", ref showS))
+            {
+                _config.ShowSRankPoints = showS;
+                _config.Save();
+            }
+
+            ImGui.Separator();
+            ImGui.TextDisabled(_mapOverlay.Status);
+        }
+        ImGui.End();
+    }
+
     private void DrawTrainControls()
     {
         // Row 1: scanning state.
@@ -1070,6 +1153,9 @@ public sealed class Plugin : IDalamudPlugin
             {
                 mark.Dead = dead;
                 mark.DeathObservedAtUtc = dead ? DateTime.UtcNow : null;
+
+                // Keep the map honest: a mark ticked dead shouldn't stay lit.
+                if (dead) _detector.RemoveSighting(mark.NameId, mark.Instance);
             }
             ImGui.SetItemAllowOverlap();
 
@@ -1685,6 +1771,10 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    /// <summary>
+    /// Grouped into collapsible sections — there are enough toggles now that a
+    /// single flat list is hard to scan.
+    /// </summary>
     private void DrawSettingsTab()
     {
         ImGui.Spacing();
@@ -1694,131 +1784,204 @@ public sealed class Plugin : IDalamudPlugin
         }
         ImGui.TextDisabled("Posts to every ENABLED webhook below.");
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.TextWrapped(
-            "Webhooks — one per Discord server (or channel) to post to. Untick Enabled to keep a " +
-            "testing channel around without deleting it. Create a webhook in Discord via Channel " +
-            "Settings > Integrations > Webhooks > New Webhook > Copy Webhook URL."
-        );
-        ImGui.Spacing();
-
-        DrawWebhookList();
-
-        ImGui.Spacing();
-        ImGui.Separator();
-
-        var pollInterval = _config.PollIntervalSeconds;
-        if (ImGui.InputInt("Check interval (seconds)", ref pollInterval))
+        if (ImGui.CollapsingHeader("Discord webhooks", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            _config.PollIntervalSeconds = Math.Clamp(pollInterval, 1, 30);
-            _config.Save();
+            ImGui.TextWrapped(
+                "One per Discord server (or channel) to post to. Untick Enabled to keep a " +
+                "testing channel around without deleting it. Create a webhook in Discord via " +
+                "Channel Settings > Integrations > Webhooks > New Webhook > Copy Webhook URL."
+            );
+            ImGui.Spacing();
+            DrawWebhookList();
+            ImGui.Spacing();
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.TextWrapped("Train list");
-        ImGui.Spacing();
-
-        var echoClick = _config.EchoOnMarkClick;
-        if (ImGui.Checkbox("Echo a mark to chat when its row is clicked", ref echoClick))
+        if (ImGui.CollapsingHeader("Train list"))
         {
-            _config.EchoOnMarkClick = echoClick;
-            _config.Save();
-        }
-        ImGui.TextDisabled("Off still flags the mark on your map — it just doesn't post the chat line. S-rank reminders are unaffected.");
-
-        var echoDetect = _config.EchoOnDetection;
-        if (ImGui.Checkbox("Echo each new mark as it's detected", ref echoDetect))
-        {
-            _config.EchoOnDetection = echoDetect;
-            _config.Save();
-        }
-        ImGui.TextDisabled("Useful while scouting with the window closed.");
-
-        var teleFlags = _config.TeleportAlsoFlags;
-        if (ImGui.Checkbox("Teleport also drops the map flag", ref teleFlags))
-        {
-            _config.TeleportAlsoFlags = teleFlags;
-            _config.Save();
-        }
-
-        var showAge = _config.ShowMarkAge;
-        if (ImGui.Checkbox("Show how long ago each mark was last seen", ref showAge))
-        {
-            _config.ShowMarkAge = showAge;
-            _config.Save();
-        }
-        ImGui.TextDisabled("Updates in place when you fly past a mark again — it won't move in the list.");
-
-        var hideZones = _config.HideZonesInPopout;
-        if (ImGui.Checkbox("Hide zone names in the train popout", ref hideZones))
-        {
-            _config.HideZonesInPopout = hideZones;
-            _config.Save();
-        }
-        ImGui.TextDisabled("Keeps the popout narrow. The Train tab always shows them.");
-
-        var autoAdv = _config.AutoAdvance;
-        if (ImGui.Checkbox("Auto-advance to the next mark when the current one dies", ref autoAdv))
-        {
-            _config.AutoAdvance = autoAdv;
-            _config.Save();
-        }
-
-        if (_config.AutoAdvance)
-        {
-            var echoAdv = _config.EchoOnAdvance;
-            if (ImGui.Checkbox("Echo and flag the mark it advances to", ref echoAdv))
+            var echoClick = _config.EchoOnMarkClick;
+            if (ImGui.Checkbox("Echo a mark to chat when its row is clicked", ref echoClick))
             {
-                _config.EchoOnAdvance = echoAdv;
+                _config.EchoOnMarkClick = echoClick;
                 _config.Save();
             }
+            ImGui.TextDisabled("Off still flags the mark on your map — it just doesn't post the chat line.");
+
+            var echoDetect = _config.EchoOnDetection;
+            if (ImGui.Checkbox("Echo each new mark as it's detected", ref echoDetect))
+            {
+                _config.EchoOnDetection = echoDetect;
+                _config.Save();
+            }
+            ImGui.TextDisabled("Useful while scouting with the window closed.");
+
+            if (_config.EchoOnDetection)
+            {
+                ImGui.Indent();
+                var eB = _config.EchoBRanks;
+                if (ImGui.Checkbox("B##echo", ref eB)) { _config.EchoBRanks = eB; _config.Save(); }
+                ImGui.SameLine();
+                var eA = _config.EchoARanks;
+                if (ImGui.Checkbox("A##echo", ref eA)) { _config.EchoARanks = eA; _config.Save(); }
+                ImGui.SameLine();
+                var eS = _config.EchoSRanks;
+                if (ImGui.Checkbox("S##echo", ref eS)) { _config.EchoSRanks = eS; _config.Save(); }
+                ImGui.SameLine();
+                ImGui.TextDisabled("which ranks to announce");
+                ImGui.Unindent();
+            }
+
+            var teleFlags = _config.TeleportAlsoFlags;
+            if (ImGui.Checkbox("Teleport also drops the map flag", ref teleFlags))
+            {
+                _config.TeleportAlsoFlags = teleFlags;
+                _config.Save();
+            }
+
+            var showAge = _config.ShowMarkAge;
+            if (ImGui.Checkbox("Show how long ago each mark was last seen", ref showAge))
+            {
+                _config.ShowMarkAge = showAge;
+                _config.Save();
+            }
+
+            var hideDeadSetting = _config.HideDeadMarks;
+            if (ImGui.Checkbox("Hide dead marks in the train list", ref hideDeadSetting))
+            {
+                _config.HideDeadMarks = hideDeadSetting;
+                _config.Save();
+            }
+            ImGui.TextDisabled("Display only — dead marks stay in the train and in reports.");
+
+            var hideZones = _config.HideZonesInPopout;
+            if (ImGui.Checkbox("Hide zone names in the train popout", ref hideZones))
+            {
+                _config.HideZonesInPopout = hideZones;
+                _config.Save();
+            }
+
+            var spicing = _config.ShowSpicing;
+            if (ImGui.Checkbox("Show spicing markers", ref spicing))
+            {
+                _config.ShowSpicing = spicing;
+                _config.Save();
+            }
+            ImGui.TextDisabled("A scout flagging a mark they'll prep before the train arrives.");
+
+            var autoAdv = _config.AutoAdvance;
+            if (ImGui.Checkbox("Auto-advance to the next mark when the current one dies", ref autoAdv))
+            {
+                _config.AutoAdvance = autoAdv;
+                _config.Save();
+            }
+
+            if (_config.AutoAdvance)
+            {
+                var echoAdv = _config.EchoOnAdvance;
+                if (ImGui.Checkbox("Echo and flag the mark it advances to", ref echoAdv))
+                {
+                    _config.EchoOnAdvance = echoAdv;
+                    _config.Save();
+                }
+            }
+
+            var rowH = _config.TrainRowHeight;
+            ImGui.SetNextItemWidth(120);
+            if (ImGui.InputInt("Row height (pixels)", ref rowH))
+            {
+                _config.TrainRowHeight = Math.Clamp(rowH, 14, 48);
+                _config.Save();
+            }
+
+            var pollInterval = _config.PollIntervalSeconds;
+            ImGui.SetNextItemWidth(120);
+            if (ImGui.InputInt("Detection interval (seconds)", ref pollInterval))
+            {
+                _config.PollIntervalSeconds = Math.Clamp(pollInterval, 1, 30);
+                _config.Save();
+            }
+            ImGui.TextDisabled("How often marks are scanned for. Lower catches more while flying fast.");
+            ImGui.Spacing();
         }
 
-        var myKills = _config.CountOnlyMyKills;
-        if (ImGui.Checkbox("Count only kills I land", ref myKills))
+        if (ImGui.CollapsingHeader("Scout & counter"))
         {
-            _config.CountOnlyMyKills = myKills;
-            _config.Save();
+            var myKills = _config.CountOnlyMyKills;
+            if (ImGui.Checkbox("Count only kills I land", ref myKills))
+            {
+                _config.CountOnlyMyKills = myKills;
+                _config.Save();
+            }
+            ImGui.TextDisabled("Off counts every trigger mob killed nearby — total progress toward the spawn rather than your own share.");
+            ImGui.Spacing();
         }
-        ImGui.TextDisabled("Off counts every trigger mob killed nearby — total progress toward the spawn rather than your own share.");
 
-        var spicing = _config.ShowSpicing;
-        if (ImGui.Checkbox("Show spicing markers", ref spicing))
+        if (ImGui.CollapsingHeader("Map spawn points"))
         {
-            _config.ShowSpicing = spicing;
-            _config.Save();
+            var mapPoints = _config.ShowSpawnPointsOnMap;
+            if (ImGui.Checkbox("Show spawn points on the in-game map", ref mapPoints))
+            {
+                _config.ShowSpawnPointsOnMap = mapPoints;
+                _config.Save();
+            }
+            ImGui.TextDisabled(_mapOverlay.Status);
+
+            if (ImGui.Button("Open map filter popout"))
+            {
+                _mapPopoutVisible = true;
+            }
+            ImGui.TextDisabled("Also /htrm — quick rank toggles without opening Settings.");
+
+            if (_config.ShowSpawnPointsOnMap)
+            {
+                var showA = _config.ShowARankPoints;
+                if (ImGui.Checkbox("A-rank points", ref showA))
+                {
+                    _config.ShowARankPoints = showA;
+                    _config.Save();
+                }
+                ImGui.SameLine();
+                var showB = _config.ShowBRankPoints;
+                if (ImGui.Checkbox("B-rank", ref showB))
+                {
+                    _config.ShowBRankPoints = showB;
+                    _config.Save();
+                }
+                ImGui.SameLine();
+                var showS = _config.ShowSRankPoints;
+                if (ImGui.Checkbox("S-rank", ref showS))
+                {
+                    _config.ShowSRankPoints = showS;
+                    _config.Save();
+                }
+                ImGui.TextDisabled("Grey = nothing there, blue = B, red = A, green = S. Hover a dot for its name.");
+
+                var dotSize = _config.SpawnDotSize;
+                ImGui.SetNextItemWidth(90);
+                if (ImGui.InputFloat("Dot size", ref dotSize, 2f))
+                {
+                    _config.SpawnDotSize = Math.Clamp(dotSize, 6f, 48f);
+                    _config.Save();
+                }
+
+                var radius = _config.SpawnPointMatchRadius;
+                ImGui.SetNextItemWidth(90);
+                if (ImGui.InputFloat("Match radius", ref radius, 0.5f))
+                {
+                    _config.SpawnPointMatchRadius = Math.Clamp(radius, 0.5f, 10f);
+                    _config.Save();
+                }
+                ImGui.TextDisabled("How close a mark must be to count as sitting on a spawn point.");
+            }
+            ImGui.Spacing();
         }
-        ImGui.TextDisabled("A scout flagging a mark they'll prep before the train arrives. Off hides the icon entirely, and imported marks look ordinary.");
 
-        var hideDeadSetting = _config.HideDeadMarks;
-        if (ImGui.Checkbox("Hide dead marks in the train list", ref hideDeadSetting))
+        if (ImGui.CollapsingHeader("Teleport"))
         {
-            _config.HideDeadMarks = hideDeadSetting;
-            _config.Save();
-        }
-        ImGui.TextDisabled("Display only — dead marks stay in the train and in reports.");
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.TextWrapped("Aetheryte blacklist");
-        ImGui.TextDisabled("Never route to these. Affects the teleport button and Next Aetheryte alike.");
-        ImGui.Spacing();
-        DrawBlacklistPicker();
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        var rowH = _config.TrainRowHeight;
-        ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("Row height (pixels)", ref rowH))
-        {
-            _config.TrainRowHeight = Math.Clamp(rowH, 14, 48);
-            _config.Save();
+            ImGui.TextWrapped("Aetheryte blacklist — never route to these.");
+            ImGui.TextDisabled("Affects the teleport button and Next Aetheryte alike.");
+            ImGui.Spacing();
+            DrawBlacklistPicker();
+            ImGui.Spacing();
         }
     }
 
@@ -1951,7 +2114,17 @@ public sealed class Plugin : IDalamudPlugin
         _huntTally.Dispose();
         _zoneReminder.Dispose();
         _counter.Dispose();
-        _detector.MarkDetected -= OnMarkDetected;
+        _mapOverlay.Dispose();
+
+        try
+        {
+            KamiToolKitLibrary.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "KamiToolKit did not shut down cleanly.");
+        }
+        _detector.OtherRankDetected -= OnSightingDetected;
         _watcher.PersistRequested -= PersistTrain;
 
         // One last write, so anything since the last periodic save survives a
@@ -1963,5 +2136,6 @@ public sealed class Plugin : IDalamudPlugin
         _commandManager.RemoveHandler(TrainCommand);
         _commandManager.RemoveHandler(CounterCommand);
         _commandManager.RemoveHandler(NextAetheryteCommand);
+        _commandManager.RemoveHandler(MapCommand);
     }
 }

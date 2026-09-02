@@ -22,6 +22,61 @@
           "buildMultiTargeting/DotNet.ReproducibleBuilds.props": {},
           "buildMultiTargeting/DotNet.ReproducibleBuilds.targets": {}
         }
+      },
+      "KamiToolKit/2.0.23": {
+        "type": "package",
+        "compile": {
+          "lib/net10.0-windows7.0/KamiToolKit.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net10.0-windows7.0/KamiToolKit.dll": {
+            "related": ".xml"
+          }
+        },
+        "contentFiles": {
+          "contentFiles/any/net10.0-windows7.0/Assets/HorizontalGradient_WhiteToAlpha.png": {
+            "buildAction": "Content",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          },
+          "contentFiles/any/net10.0-windows7.0/Assets/VerticalGradient_AlphaToBlack.png": {
+            "buildAction": "Content",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          },
+          "contentFiles/any/net10.0-windows7.0/Assets/VerticalGradient_WhiteToAlpha.png": {
+            "buildAction": "Content",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          },
+          "contentFiles/any/net10.0-windows7.0/Assets/alpha_background.png": {
+            "buildAction": "Content",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          },
+          "contentFiles/any/net10.0-windows7.0/Assets/alpha_selector.png": {
+            "buildAction": "Content",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          },
+          "contentFiles/any/net10.0-windows7.0/Assets/color_ring.png": {
+            "buildAction": "Content",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          },
+          "contentFiles/any/net10.0-windows7.0/Assets/color_ring_selector.png": {
+            "buildAction": "Content",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          },
+          "contentFiles/any/net10.0-windows7.0/Assets/color_select_dot.png": {
+            "buildAction": "Content",
+            "codeLanguage": "any",
+            "copyToOutput": false
+          }
+        }
       }
     }
   },
@@ -63,19 +118,49 @@
         "dotnet.reproduciblebuilds.1.2.39.nupkg.sha512",
         "dotnet.reproduciblebuilds.nuspec"
       ]
+    },
+    "KamiToolKit/2.0.23": {
+      "sha512": "hvf+XnPqOQfbZv4FGKX1+Iq7i9CMi1/tvNazQ9yNl9CMdoSGWYZ2FCCbuOQPeFAiiDciA7UNm8dV9ksNjc1VKw==",
+      "type": "package",
+      "path": "kamitoolkit/2.0.23",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "content/Assets/HorizontalGradient_WhiteToAlpha.png",
+        "content/Assets/VerticalGradient_AlphaToBlack.png",
+        "content/Assets/VerticalGradient_WhiteToAlpha.png",
+        "content/Assets/alpha_background.png",
+        "content/Assets/alpha_selector.png",
+        "content/Assets/color_ring.png",
+        "content/Assets/color_ring_selector.png",
+        "content/Assets/color_select_dot.png",
+        "contentFiles/any/net10.0-windows7.0/Assets/HorizontalGradient_WhiteToAlpha.png",
+        "contentFiles/any/net10.0-windows7.0/Assets/VerticalGradient_AlphaToBlack.png",
+        "contentFiles/any/net10.0-windows7.0/Assets/VerticalGradient_WhiteToAlpha.png",
+        "contentFiles/any/net10.0-windows7.0/Assets/alpha_background.png",
+        "contentFiles/any/net10.0-windows7.0/Assets/alpha_selector.png",
+        "contentFiles/any/net10.0-windows7.0/Assets/color_ring.png",
+        "contentFiles/any/net10.0-windows7.0/Assets/color_ring_selector.png",
+        "contentFiles/any/net10.0-windows7.0/Assets/color_select_dot.png",
+        "kamitoolkit.2.0.23.nupkg.sha512",
+        "kamitoolkit.nuspec",
+        "lib/net10.0-windows7.0/KamiToolKit.dll",
+        "lib/net10.0-windows7.0/KamiToolKit.xml"
+      ]
     }
   },
   "projectFileDependencyGroups": {
     "net10.0-windows": [
       "DalamudPackager >= 15.0.0",
-      "DotNet.ReproducibleBuilds >= 1.2.39"
+      "DotNet.ReproducibleBuilds >= 1.2.39",
+      "KamiToolKit >= 2.0.23"
     ]
   },
   "packageFolders": {
     "C:\\Users\\chris\\.nuget\\packages\\": {}
   },
   "project": {
-    "version": "1.15.1",
+    "version": "1.16.0",
     "restore": {
       "projectUniqueName": "E:\\GitProjects\\HuntTrainRelay\\HuntTrainRelay.csproj",
       "projectName": "HuntTrainRelay",
@@ -127,6 +212,10 @@
             "suppressParent": "All",
             "target": "Package",
             "version": "[1.2.39, )"
+          },
+          "KamiToolKit": {
+            "target": "Package",
+            "version": "[2.0.23, )"
           }
         },
         "imports": [
