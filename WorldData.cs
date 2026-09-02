@@ -55,6 +55,38 @@ public sealed class WorldData
     public IReadOnlyList<WorldEntry> WorldsIn(uint dataCenterId) =>
         _worlds.Where(w => w.DataCenterId == dataCenterId).OrderBy(w => w.Name).ToList();
 
+    /// <summary>
+    /// Resolves a world to its position in the picker: which data centre index
+    /// and which world index within that centre. Returns null when the world
+    /// isn't in the list (unknown id, or the sheets failed to load).
+    /// </summary>
+    public (int DcIndex, int WorldIndex)? LocateWorld(uint worldId)
+    {
+        var world = _worlds.FirstOrDefault(w => w.RowId == worldId);
+        if (world.RowId == 0) return null;
+
+        var dcIndex = -1;
+        for (var i = 0; i < DataCenters.Count; i++)
+        {
+            if (DataCenters[i].Id != world.DataCenterId) continue;
+            dcIndex = i;
+            break;
+        }
+        if (dcIndex < 0) return null;
+
+        var worlds = WorldsIn(world.DataCenterId);
+        var worldIndex = -1;
+        for (var i = 0; i < worlds.Count; i++)
+        {
+            if (worlds[i].RowId != worldId) continue;
+            worldIndex = i;
+            break;
+        }
+        if (worldIndex < 0) return null;
+
+        return (dcIndex, worldIndex);
+    }
+
     public string NameOf(uint worldId) =>
         _worlds.FirstOrDefault(w => w.RowId == worldId).Name ?? $"World {worldId}";
 }

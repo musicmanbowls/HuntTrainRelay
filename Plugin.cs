@@ -55,6 +55,11 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WorldData _worldData;
     private int _counterDcIndex;
     private int _counterWorldIndex;
+
+    // The world the picker last auto-followed. A manual selection sticks until
+    // the player's world actually changes — otherwise deliberately looking at
+    // another world's counts would be yanked back every frame.
+    private uint _lastSeenWorldId;
     private double _secondsSinceAutoResetCheck;
     private readonly IClientState _clientState;
 
@@ -1566,6 +1571,19 @@ public sealed class Plugin : IDalamudPlugin
         var dcs = _worldData.DataCenters;
         if (dcs.Count > 0)
         {
+            // Follow the player's world when it changes, then leave the picker
+            // alone so a manual selection isn't fought.
+            var liveWorld = _counter.CurrentWorldId();
+            if (liveWorld != 0 && liveWorld != _lastSeenWorldId)
+            {
+                _lastSeenWorldId = liveWorld;
+                if (_worldData.LocateWorld(liveWorld) is { } located)
+                {
+                    _counterDcIndex = located.DcIndex;
+                    _counterWorldIndex = located.WorldIndex;
+                }
+            }
+
             ImGui.Spacing();
             var dcNames = dcs.Select(d => d.Name).ToArray();
             _counterDcIndex = Math.Clamp(_counterDcIndex, 0, dcs.Count - 1);
