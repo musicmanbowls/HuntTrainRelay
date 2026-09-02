@@ -52,6 +52,10 @@ public sealed class Plugin : IDalamudPlugin
     // (Umbra.Game/src/Travel/TravelDestination.cs: IconAetheryte = 60453).
     private const uint AetheryteIconId = 60453;
     private readonly HuntCounter _counter;
+    private readonly WorldData _worldData;
+    private int _counterDcIndex;
+    private int _counterWorldIndex;
+    private double _secondsSinceAutoResetCheck;
     private readonly IClientState _clientState;
 
     private uint _clientTerritory => _clientState.TerritoryType;
@@ -122,7 +126,8 @@ public sealed class Plugin : IDalamudPlugin
         SyncBlacklist();
         _watcher = new TrainWatcher(framework, _ipc, _huntTally, _detector, _config);
         _zoneReminder = new SRankZoneReminder(clientState, chatGui, _log, _config, _detector);
-        _counter = new HuntCounter(chatGui);
+        _counter = new HuntCounter(chatGui, objectTable, _config);
+        _worldData = new WorldData(dataManager);
         _detector.MarkDetected += OnMarkDetected;
         _watcher.PersistRequested += PersistTrain;
         RestoreSavedTrain();
@@ -307,6 +312,14 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawUI()
     {
+        // Cheap enough to check on a slow tick; counters age out in hours.
+        _secondsSinceAutoResetCheck += ImGui.GetIO().DeltaTime;
+        if (_secondsSinceAutoResetCheck >= 30)
+        {
+            _secondsSinceAutoResetCheck = 0;
+            _counter.ApplyAutoResets();
+        }
+
         ProcessPendingCustomRemovals();
         UpdateAutoAdvance();
         DrawTrainPopout();
@@ -1261,7 +1274,11 @@ public sealed class Plugin : IDalamudPlugin
     }
 
 
-    private void DrawCounterList(bool currentZoneOnly = false)
+    /// <summary>
+    /// Counter rows for one world. Counts are kept per world, so the same mark
+    /// tracked on Mateus and on Zalera are genuinely separate tallies.
+    /// </summary>
+    private void DrawCounterList(bool currentZoneOnly, uint worldId, uint instance, string worldName)
     {
         var defs = HuntCounter.Definitions.AsEnumerable();
         if (currentZoneOnly)
@@ -1270,31 +1287,75 @@ public sealed class Plugin : IDalamudPlugin
             defs = defs.Where(d => d.TerritoryId == here);
         }
 
-        if (currentZoneOnly && !defs.Any())
+        var list = defs.ToList();
+        if (list.Count == 0)
         {
-            ImGui.TextDisabled("No counted S-rank in this zone.");
+            ImGui.TextDisabled(currentZoneOnly
+                ? "No counted S-rank in this zone."
+                : "No counters available.");
             return;
         }
 
-        foreach (var def in defs)
+        foreach (var def in list)
         {
-            ImGui.PushID(def.MarkName);
-            ImGui.TextWrapped($"{def.MarkName} — {def.Zone}");
+            ImGui.PushID($"{def.MarkName}_{worldId}");
+            ImGui.TextWrapped($"{def.MarkName} — {def.Zone} ({worldName})");
 
             foreach (var mob in def.MobNames)
             {
-                var count = _counter.Tallies.TryGetValue(mob, out var c) ? c : 0;
+                var count = _counter.GetTally(worldId, instance, mob);
                 ImGui.TextDisabled($"    {mob}: {count}");
             }
 
+            var settings = _counter.SettingsFor(def.MarkName);
+
+            var autoReset = settings.AutoResetEnabled;
+            if (ImGui.Checkbox("Auto-reset", ref autoReset))
+            {
+                settings.AutoResetEnabled = autoReset;
+                _config.Save();
+            }
+
+            if (settings.AutoResetEnabled)
+            {
+                ImGui.SameLine();
+                var hours = settings.AutoResetHours;
+                ImGui.SetNextItemWidth(90);
+                if (ImGui.InputInt("hrs", ref hours))
+                {
+                    settings.AutoResetHours = Math.Clamp(hours, 1, 9);
+                    _config.Save();
+                }
+
+                // Countdown so a reset is never a surprise.
+                var last = _counter.GetLastKill(worldId, instance, def.MarkName);
+                if (last is { } lastKill)
+                {
+                    var due = lastKill.AddHours(Math.Clamp(settings.AutoResetHours, 1, 9));
+                    var remaining = due - DateTime.UtcNow;
+                    ImGui.SameLine();
+                    ImGui.TextDisabled(remaining > TimeSpan.Zero
+                        ? $"resets in {FormatRemaining(remaining)}"
+                        : "resetting…");
+                }
+            }
+
+            ImGui.SameLine();
             if (ImGui.SmallButton("Reset"))
             {
-                _counter.ResetFor(def);
+                _counter.ResetFor(def, worldId, instance);
             }
 
             ImGui.Separator();
             ImGui.PopID();
         }
+    }
+
+    private static string FormatRemaining(TimeSpan span)
+    {
+        if (span.TotalHours >= 1) return $"{(int)span.TotalHours}h {span.Minutes}m";
+        if (span.TotalMinutes >= 1) return $"{(int)span.TotalMinutes}m";
+        return "<1m";
     }
 
     private void DrawCounterPopout()
@@ -1304,7 +1365,11 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.SetNextWindowSize(new Vector2(300, 400), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Hunt Counter", ref _counterPopoutVisible))
         {
-            DrawCounterList(currentZoneOnly: true);
+            DrawCounterList(
+                currentZoneOnly: true,
+                worldId: _counter.CurrentWorldId(),
+                instance: MarkDetector.GetCurrentInstance(),
+                worldName: _counter.CurrentWorldName());
         }
         ImGui.End();
     }
@@ -1495,8 +1560,46 @@ public sealed class Plugin : IDalamudPlugin
             _counter.Reset();
         }
         ImGui.TextDisabled("Counts trigger-mob kills for S-ranks that need them (also /htrc).");
+
+        // World picker — the popout always shows where you're standing, but a
+        // scout may want to check counts for another world entirely.
+        var dcs = _worldData.DataCenters;
+        if (dcs.Count > 0)
+        {
+            ImGui.Spacing();
+            var dcNames = dcs.Select(d => d.Name).ToArray();
+            _counterDcIndex = Math.Clamp(_counterDcIndex, 0, dcs.Count - 1);
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.Combo("Data centre", ref _counterDcIndex, dcNames, dcNames.Length))
+                _counterWorldIndex = 0;
+
+            var worlds = _worldData.WorldsIn(dcs[_counterDcIndex].Id);
+            if (worlds.Count > 0)
+            {
+                var worldNames = worlds.Select(w => w.Name).ToArray();
+                _counterWorldIndex = Math.Clamp(_counterWorldIndex, 0, worlds.Count - 1);
+                ImGui.SameLine();
+                ImGui.SetNextItemWidth(150);
+                ImGui.Combo("World", ref _counterWorldIndex, worldNames, worldNames.Length);
+
+                var chosen = worlds[_counterWorldIndex];
+                ImGui.Spacing();
+                DrawCounterList(
+                    currentZoneOnly: false,
+                    worldId: chosen.RowId,
+                    instance: 0,
+                    worldName: chosen.Name);
+                return;
+            }
+        }
+
+        // No world list available — fall back to wherever the player is.
         ImGui.Spacing();
-        DrawCounterList();
+        DrawCounterList(
+            currentZoneOnly: false,
+            worldId: _counter.CurrentWorldId(),
+            instance: MarkDetector.GetCurrentInstance(),
+            worldName: _counter.CurrentWorldName());
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -1655,6 +1758,14 @@ public sealed class Plugin : IDalamudPlugin
                 _config.Save();
             }
         }
+
+        var myKills = _config.CountOnlyMyKills;
+        if (ImGui.Checkbox("Count only kills I land", ref myKills))
+        {
+            _config.CountOnlyMyKills = myKills;
+            _config.Save();
+        }
+        ImGui.TextDisabled("Off counts every trigger mob killed nearby — total progress toward the spawn rather than your own share.");
 
         var spicing = _config.ShowSpicing;
         if (ImGui.Checkbox("Show spicing markers", ref spicing))

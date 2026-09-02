@@ -301,7 +301,7 @@ public sealed class MarkDetector
         _dataManager.GetExcelSheet<TerritoryType>().GetRowOrDefault(territoryId)?.Map.RowId ?? 0;
 
 
-    private static unsafe uint GetCurrentInstance()
+    public static unsafe uint GetCurrentInstance()
     {
         try
         {

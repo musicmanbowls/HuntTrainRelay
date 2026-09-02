@@ -60,6 +60,20 @@ public class PersistedMark
     public bool Spiced { get; set; }
 }
 
+/// <summary>Per-mark auto-reset settings for the trigger-mob counters.</summary>
+[Serializable]
+public class CounterSettings
+{
+    public bool AutoResetEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Hours of no contribution before the count clears. Measured from the
+    /// last kill rather than the last reset, so an active grind never resets
+    /// under you.
+    /// </summary>
+    public int AutoResetHours { get; set; } = 1;
+}
+
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
@@ -172,6 +186,28 @@ public class Configuration : IPluginConfiguration
     /// use it can turn it off and imported marks look completely ordinary.
     /// </summary>
     public bool ShowSpicing { get; set; } = true;
+
+    /// <summary>
+    /// Count only kills you personally landed ("You defeat the X") rather than
+    /// every kill in range. Both readings are legitimate — personal effort when
+    /// splitting a zone with a party, versus total progress toward the spawn.
+    /// </summary>
+    public bool CountOnlyMyKills { get; set; } = true;
+
+    /// <summary>
+    /// Trigger-mob tallies, keyed "worldId:instance:mobName" so each world
+    /// keeps its own count.
+    /// </summary>
+    public Dictionary<string, int> CounterTallies { get; set; } = new();
+
+    /// <summary>
+    /// Last contribution per counter, keyed "worldId:instance:markName".
+    /// Drives the auto-reset window.
+    /// </summary>
+    public Dictionary<string, DateTime> CounterLastKill { get; set; } = new();
+
+    /// <summary>Auto-reset settings, keyed by mark name.</summary>
+    public Dictionary<string, CounterSettings> CounterConfig { get; set; } = new();
 
     /// <summary>
     /// The in-progress train, saved so a crash mid-train doesn't lose kill

@@ -60,29 +60,130 @@ public sealed class HuntCounter : IDisposable
                 MobNames = new[] { "Earth Sprite" } },
     };
 
+    // "You defeat the X" — only your own kills.
+    private const string PersonalRegexBase = "(?i)^you defeat the ";
+
     private readonly IChatGui _chatGui;
-    private readonly Dictionary<string, int> _tallies = new();
-    private readonly List<(Regex Pattern, string MobName)> _patterns = new();
+    private readonly IObjectTable _objectTable;
+    private readonly Configuration _config;
 
-    public IReadOnlyDictionary<string, int> Tallies => _tallies;
+    private readonly List<(Regex Personal, Regex Nearby, string MobName, string MarkName)> _patterns = new();
 
-    public HuntCounter(IChatGui chatGui)
+    public HuntCounter(IChatGui chatGui, IObjectTable objectTable, Configuration config)
     {
         _chatGui = chatGui;
+        _objectTable = objectTable;
+        _config = config;
 
         foreach (var def in Definitions)
         {
             foreach (var mob in def.MobNames)
             {
-                _tallies[mob] = 0;
-                // Longer names first so "Naked Yumemi" can't be eaten by "Yumemi".
-                _patterns.Add((new Regex(BattleRegexBase + Regex.Escape(mob), RegexOptions.Compiled), mob));
+                _patterns.Add((
+                    new Regex(PersonalRegexBase + Regex.Escape(mob), RegexOptions.Compiled),
+                    new Regex(BattleRegexBase + Regex.Escape(mob), RegexOptions.Compiled),
+                    mob,
+                    def.MarkName));
             }
         }
 
+        // Longer names first so "Naked Yumemi" can't be eaten by "Yumemi".
         _patterns.Sort((a, b) => b.MobName.Length.CompareTo(a.MobName.Length));
 
         _chatGui.ChatMessage += OnChatMessage;
+    }
+
+    /// <summary>Row id of the world the player is on, or 0 if unknown.</summary>
+    public uint CurrentWorldId()
+    {
+        try
+        {
+            return _objectTable.LocalPlayer?.CurrentWorld.RowId ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>Display name of the player's world, for labelling counts.</summary>
+    public string CurrentWorldName()
+    {
+        try
+        {
+            var name = _objectTable.LocalPlayer?.CurrentWorld.Value.Name.ExtractText();
+            return string.IsNullOrWhiteSpace(name) ? "Unknown" : name;
+        }
+        catch
+        {
+            return "Unknown";
+        }
+    }
+
+    private static string TallyKey(uint worldId, uint instance, string mobName) =>
+        $"{worldId}:{instance}:{mobName}";
+
+    private static string MarkKey(uint worldId, uint instance, string markName) =>
+        $"{worldId}:{instance}:{markName}";
+
+    /// <summary>Current tally for a mob on a given world.</summary>
+    public int GetTally(uint worldId, uint instance, string mobName) =>
+        _config.CounterTallies.TryGetValue(TallyKey(worldId, instance, mobName), out var n) ? n : 0;
+
+    /// <summary>When this counter last had a kill on that world, if ever.</summary>
+    public DateTime? GetLastKill(uint worldId, uint instance, string markName) =>
+        _config.CounterLastKill.TryGetValue(MarkKey(worldId, instance, markName), out var t) ? t : null;
+
+    /// <summary>Auto-reset settings for a mark, created on first access.</summary>
+    public CounterSettings SettingsFor(string markName)
+    {
+        if (!_config.CounterConfig.TryGetValue(markName, out var settings))
+        {
+            settings = new CounterSettings();
+            _config.CounterConfig[markName] = settings;
+        }
+        return settings;
+    }
+
+    /// <summary>
+    /// Clears any counter whose last contribution is older than its configured
+    /// window. Measured from the last kill, so an active grind is never reset
+    /// out from under the player.
+    /// </summary>
+    public void ApplyAutoResets()
+    {
+        var now = DateTime.UtcNow;
+        var changed = false;
+
+        foreach (var def in Definitions)
+        {
+            var settings = SettingsFor(def.MarkName);
+            if (!settings.AutoResetEnabled) continue;
+
+            var window = TimeSpan.FromHours(Math.Clamp(settings.AutoResetHours, 1, 9));
+
+            // Every world tracked for this mark, since a count on a world the
+            // player has left should still age out.
+            var stale = _config.CounterLastKill
+                .Where(kv => kv.Key.EndsWith($":{def.MarkName}", StringComparison.Ordinal)
+                             && now - kv.Value >= window)
+                .Select(kv => kv.Key)
+                .ToList();
+
+            foreach (var markKey in stale)
+            {
+                var prefix = markKey[..(markKey.LastIndexOf(':') + 1)];
+                foreach (var mob in def.MobNames)
+                {
+                    if (_config.CounterTallies.Remove(prefix + mob)) changed = true;
+                }
+
+                _config.CounterLastKill.Remove(markKey);
+                changed = true;
+            }
+        }
+
+        if (changed) _config.Save();
     }
 
     private void OnChatMessage(IHandleableChatMessage message)
@@ -96,24 +197,38 @@ public sealed class HuntCounter : IDisposable
             and not XivChatType.Action) return;
 
         var text = message.OriginalMessage.ToString();
-        foreach (var (pattern, mobName) in _patterns)
+        var worldId = CurrentWorldId();
+        var instance = MarkDetector.GetCurrentInstance();
+
+        foreach (var (personal, nearby, mobName, markName) in _patterns)
         {
+            var pattern = _config.CountOnlyMyKills ? personal : nearby;
             if (!pattern.IsMatch(text)) continue;
-            _tallies[mobName]++;
+
+            var key = TallyKey(worldId, instance, mobName);
+            _config.CounterTallies[key] = (_config.CounterTallies.TryGetValue(key, out var n) ? n : 0) + 1;
+            _config.CounterLastKill[MarkKey(worldId, instance, markName)] = DateTime.UtcNow;
+            _config.Save();
             break; // one line is one kill
         }
     }
 
+    /// <summary>Clears every count on every world.</summary>
     public void Reset()
     {
-        foreach (var key in _tallies.Keys.ToList())
-            _tallies[key] = 0;
+        _config.CounterTallies.Clear();
+        _config.CounterLastKill.Clear();
+        _config.Save();
     }
 
-    public void ResetFor(CounterDefinition def)
+    /// <summary>Clears one mark's counts on the given world.</summary>
+    public void ResetFor(CounterDefinition def, uint worldId, uint instance)
     {
         foreach (var mob in def.MobNames)
-            _tallies[mob] = 0;
+            _config.CounterTallies.Remove(TallyKey(worldId, instance, mob));
+
+        _config.CounterLastKill.Remove(MarkKey(worldId, instance, def.MarkName));
+        _config.Save();
     }
 
     public void Dispose()
